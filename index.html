@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Equipment Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<style>
+:root{
+  --bg:#EDF1F0;--surface:#FFFFFF;--ink:#12262B;--muted:#5D7176;--line:#D3DDDB;
+  --brand:#0F5E6B;--on-brand:#FFFFFF;--ok:#1E8A5A;--warn:#C98100;--bad:#C23B30;--retired:#8A9799;
+  --tint:#E3EDEC;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0D1A1D;--surface:#14262A;--ink:#E6F0EE;--muted:#8FA6A9;--line:#27403F;
+    --brand:#4FB3C2;--on-brand:#06242A;--ok:#3CC48A;--warn:#E5A82B;--bad:#F0705F;--retired:#6F8486;--tint:#1B3236;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0D1A1D;--surface:#14262A;--ink:#E6F0EE;--muted:#8FA6A9;--line:#27403F;
+  --brand:#4FB3C2;--on-brand:#06242A;--ok:#3CC48A;--warn:#E5A82B;--bad:#F0705F;--retired:#6F8486;--tint:#1B3236;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:"Schibsted Grotesk",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:16px;line-height:1.45;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;min-height:100vh}
+a{color:inherit;text-decoration:none}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
+#app{max-width:640px;margin:0 auto;padding:16px 16px 110px}
+h1{font-size:28px;line-height:1.1;margin:4px 0 2px;letter-spacing:-.02em;font-weight:700}
+h2{font-size:18px;margin:0 0 10px;font-weight:650}
+h3{font-size:15px;margin:0;font-weight:650}
+.sub{color:var(--muted);font-size:14px;margin:0 0 18px}
+.sec{margin:26px 0 0}
+.sec>h2{display:flex;justify-content:space-between;align-items:baseline}
+.sec>h2 small{font-size:13px;color:var(--muted);font-weight:500}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+
+/* triage strip */
+.strip{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.strip a{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 12px 10px;border-top:6px solid var(--c);display:block}
+.strip b{display:block;font-size:30px;line-height:1;font-weight:700;margin-bottom:4px}
+.strip span{font-size:13px;color:var(--muted)}
+
+/* device tag row */
+.list{display:flex;flex-direction:column;gap:10px}
+.tag{position:relative;display:block;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px 12px 34px;overflow:hidden}
+.tag::before{content:"";position:absolute;left:0;top:0;bottom:0;width:20px;background:var(--c,var(--retired))}
+.tag::after{content:"";position:absolute;left:6px;top:12px;width:8px;height:8px;border-radius:50%;background:var(--surface)}
+.tag .t{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.tag .n{font-weight:650}
+.tag .m{color:var(--muted);font-size:14px;margin-top:2px}
+.tag .d{font-size:14px;margin-top:6px}
+.pill{display:inline-block;font-size:12.5px;font-weight:600;padding:2px 9px;border-radius:99px;background:var(--tint);white-space:nowrap}
+.pill.bad{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
+.pill.warn{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}
+.pill.ok{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+.pill.off{color:var(--muted)}
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:12px;padding:18px;color:var(--muted);font-size:15px}
+.empty .btn{margin-top:12px}
+
+/* buttons */
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:11px 16px;font-weight:600;cursor:pointer;min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn.primary{background:var(--brand);color:var(--on-brand);border-color:var(--brand)}
+.btn.danger{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,var(--line))}
+.btn.ghost{background:transparent}
+.btn.block{width:100%}
+.btnrow{display:flex;gap:10px;margin-top:18px}
+.btnrow .btn{flex:1}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0 0}
+.actions .wide{grid-column:1/-1}
+
+/* header bar on subpages */
+.top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+.back{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--brand);padding:8px 0;min-height:44px}
+
+/* search + chips */
+.search{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:12px 14px;min-height:46px}
+.chips{display:flex;gap:8px;margin:12px 0 14px;overflow-x:auto;padding-bottom:2px}
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:7px 14px;font-size:14px;font-weight:600;white-space:nowrap;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--brand);color:var(--on-brand);border-color:var(--brand)}
+
+/* detail */
+.hero{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.hero .band{background:var(--c);color:#fff;padding:10px 16px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+.hero .body{padding:14px 16px 16px}
+.hero .id{font-size:14px;color:var(--muted);margin-top:2px}
+dl.kv{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;margin:14px 0 0;font-size:15px}
+dl.kv dt{color:var(--muted)}
+dl.kv dd{margin:0;text-align:right;overflow-wrap:anywhere}
+.fault{background:color-mix(in srgb,var(--bad) 8%,var(--surface));border:1px solid color-mix(in srgb,var(--bad) 35%,var(--line));border-radius:12px;padding:14px;margin-top:14px}
+.fault p{margin:6px 0 0}
+.tl{list-style:none;margin:0;padding:0 0 0 18px;border-left:2px solid var(--line)}
+.tl li{position:relative;padding:0 0 16px 14px}
+.tl li::before{content:"";position:absolute;left:-25px;top:6px;width:10px;height:10px;border-radius:50%;background:var(--c,var(--muted));border:2px solid var(--bg)}
+.tl .when{font-size:13px;color:var(--muted)}
+
+/* nav */
+nav.bar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);display:flex;justify-content:center;padding-bottom:env(safe-area-inset-bottom,0px);z-index:20}
+nav.bar .in{display:grid;grid-template-columns:repeat(4,1fr);width:100%;max-width:640px}
+nav.bar a{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 4px 9px;font-size:12.5px;font-weight:600;color:var(--muted);min-height:56px}
+nav.bar a svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+nav.bar a[aria-current="page"]{color:var(--brand)}
+nav.bar a.scan{color:var(--on-brand)}
+nav.bar a.scan span.disc{background:var(--brand);width:46px;height:46px;border-radius:50%;display:grid;place-items:center;margin-top:-18px;border:4px solid var(--surface)}
+nav.bar a.scan{color:var(--brand)}
+nav.bar a.scan span.disc svg{stroke:var(--on-brand)}
+
+/* sheet */
+#sheet[hidden]{display:none}
+#sheet .scrim{position:fixed;inset:0;background:rgba(5,15,18,.55);z-index:40}
+#sheet .panel{position:fixed;left:0;right:0;bottom:0;max-width:640px;margin:0 auto;background:var(--surface);border-radius:18px 18px 0 0;padding:10px 18px calc(18px + env(safe-area-inset-bottom,0px));z-index:41;max-height:90vh;overflow:auto;animation:up .18s ease-out}
+#sheet .grab{width:42px;height:4px;border-radius:4px;background:var(--line);margin:0 auto 12px}
+@keyframes up{from{transform:translateY(24px);opacity:.4}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){#sheet .panel{animation:none}}
+label.f{display:block;margin-top:12px;font-size:14px;font-weight:600}
+label.f input,label.f select,label.f textarea{display:block;width:100%;margin-top:5px;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:11px 12px;min-height:46px;font-weight:400}
+label.f textarea{min-height:84px;resize:vertical}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* scan */
+.cam{position:relative;background:#000;border-radius:14px;overflow:hidden;aspect-ratio:1/1}
+.cam video{width:100%;height:100%;object-fit:cover}
+.cam .frame{position:absolute;inset:18%;border:3px solid rgba(255,255,255,.85);border-radius:16px;pointer-events:none}
+.note{background:var(--tint);border-radius:10px;padding:12px 14px;font-size:14px;margin-top:12px}
+
+/* labels */
+.qr svg{width:100%;height:auto;display:block}
+.labelbig{background:#fff;color:#111;border-radius:14px;padding:22px;text-align:center;border:1px solid var(--line)}
+.labelbig .qr{max-width:260px;margin:0 auto}
+.labelbig b{display:block;font-size:22px;margin-top:10px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.lab{background:#fff;color:#111;border:1px dashed #9aa;border-radius:8px;padding:10px;text-align:center;break-inside:avoid}
+.lab .qr{max-width:120px;margin:0 auto}
+.lab b{display:block;font-size:14px;margin-top:4px}
+.lab span{font-size:12px;color:#444}
+
+#toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;font-weight:600;z-index:60;max-width:90%;opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.show{opacity:1}
+
+@media print{
+  nav.bar,.top .btn,.noprint,#toast,#sheet{display:none!important}
+  body{background:#fff}
+  #app{padding:0;max-width:none}
+  .grid{grid-template-columns:repeat(4,1fr)}
+}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<nav class="bar" aria-label="Main" style="display:none">
+  <div class="in">
+    <a href="#/" data-nav="today"><svg viewBox="0 0 24 24"><path d="M3 12l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Today</a>
+    <a href="#/devices" data-nav="devices"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>Devices</a>
+    <a href="#/scan" class="scan" data-nav="scan"><span class="disc"><svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3M4 12h16"/></svg></span>Scan</a>
+    <a href="#/more" data-nav="more"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Account</a>
+  </div>
+</nav>
+<div id="sheet" hidden></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+(function(){
+"use strict";
+
+/* ---------- config ---------- */
+const SB_URL='https://kqayyuanjcbgopffbemt.supabase.co';
+const SB_KEY='sb_publishable_wwOwc97yqc1igaUZ5JphFw_976_93XO';
+const sb=window.supabase.createClient(SB_URL,SB_KEY);
+
+/* ---------- helpers ---------- */
+const $=(s,r)=>(r||document).querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad=n=>String(n).padStart(2,'0');
+const today=()=>{const d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());};
+const dayNum=s=>Math.floor(Date.parse(s+'T00:00:00Z')/864e5);
+const fmt=s=>s?new Date(s+'T00:00:00Z').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}):'-';
+const naira=n=>n===''||n==null||isNaN(n)?'':'₦'+Number(n).toLocaleString('en-NG');
+let toastTimer;
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2800);}
+
+/* ---------- state ---------- */
+let S={devices:[],faults:[],services:[]};
+let session=null,loaded=false,loading=false;
+const dev=id=>S.devices.find(d=>d.id===id);
+const openFault=d=>S.faults.find(f=>f.deviceId===d.id&&!f.resolvedAt);
+function lastService(d){let best=d.baseline||d.added;S.services.forEach(s=>{if(s.deviceId===d.id&&s.date>best)best=s.date;});return best;}
+function dueIn(d){if(!d.ppmDays||d.retired)return null;return dayNum(lastService(d))+Number(d.ppmDays)-dayNum(today());}
+function state(d){
+  if(d.retired)return {k:'retired',label:'Retired',c:'var(--retired)'};
+  if(openFault(d))return {k:'down',label:'Down',c:'var(--bad)'};
+  const di=dueIn(d);
+  if(di!==null&&di<0)return {k:'due',label:'Service overdue',c:'var(--warn)'};
+  return {k:'ok',label:'Working',c:'var(--ok)'};
+}
+function uptime30(){
+  const act=S.devices.filter(d=>!d.retired);if(!act.length)return null;
+  const end=dayNum(today()),start=end-29;let down=0;
+  act.forEach(d=>{const set=new Set();S.faults.forEach(f=>{if(f.deviceId!==d.id)return;
+    const a=Math.max(dayNum(f.reportedAt),start),b=Math.min(f.resolvedAt?dayNum(f.resolvedAt):end,end);
+    for(let i=a;i<=b;i++)set.add(i);});down+=set.size;});
+  return Math.max(0,Math.round(100*(1-down/(act.length*30))));
+}
+const daysOpen=f=>Math.max(0,(f.resolvedAt?dayNum(f.resolvedAt):dayNum(today()))-dayNum(f.reportedAt));
+const intervalLabel=n=>({30:'Every month',90:'Every 3 months',180:'Every 6 months',365:'Every year'}[n]||(n?'Every '+n+' days':'No schedule'));
+
+/* ---------- data layer ---------- */
+async function loadAll(){
+  if(!session||loading)return false;
+  loading=true;
+  try{
+    const [d,f,s]=await Promise.all([
+      sb.from('devices').select('*').order('id'),
+      sb.from('faults').select('*').order('reported_at',{ascending:false}).limit(5000),
+      sb.from('services').select('*').order('service_date',{ascending:false}).limit(5000)
+    ]);
+    if(d.error||f.error||s.error){toast('Could not load data. Check your connection.');return false;}
+    S.devices=d.data.map(x=>({id:x.id,name:x.name,category:x.category||'',model:x.model||'',serial:x.serial||'',ward:x.ward,ppmDays:x.ppm_days||0,baseline:x.baseline||'',added:x.added,retired:x.retired}));
+    S.faults=f.data.map(x=>({id:x.id,deviceId:x.device_id,desc:x.descr,priority:x.priority,reporter:x.reporter||'',reportedAt:x.reported_at,stage:x.stage,resolvedAt:x.resolved_at,action:x.action||'',cost:x.cost==null?'':x.cost}));
+    S.services=s.data.map(x=>({id:x.id,deviceId:x.device_id,type:x.type,date:x.service_date,notes:x.notes||'',by:x.by_name||''}));
+    loaded=true;
+    return true;
+  }catch(e){toast('Could not reach the server. Check your connection.');return false;}
+  finally{loading=false;}
+}
+async function run(q,okMsg){
+  const r=await q;
+  if(r&&r.error){toast(r.error.message||'Something went wrong');return false;}
+  await loadAll();
+  if(okMsg)toast(okMsg);
+  render();
+  return true;
+}
+
+/* ---------- sheet ---------- */
+function sheet(title,body,onSubmit,submitLabel){
+  const el=$('#sheet');
+  el.innerHTML='<div class="scrim" data-act="closeSheet"></div><div class="panel" role="dialog" aria-modal="true" aria-label="'+esc(title)+'"><div class="grab"></div><h2>'+esc(title)+'</h2><form id="sheetForm">'+body+'<div class="btnrow"><button type="button" class="btn ghost" data-act="closeSheet">Cancel</button><button class="btn primary">'+esc(submitLabel||'Save')+'</button></div></form></div>';
+  el.hidden=false;
+  const f=$('#sheetForm'),btn=f.querySelector('.primary');
+  f.addEventListener('submit',e=>{
+    e.preventDefault();
+    const fd={};new FormData(f).forEach((v,k)=>{fd[k]=typeof v==='string'?v.trim():v;});
+    btn.disabled=true;
+    Promise.resolve(onSubmit(fd)).catch(()=>toast('Something went wrong')).finally(()=>{if(btn.isConnected)btn.disabled=false;});
+  });
+  const first=f.querySelector('input,select,textarea');if(first)first.focus();
+}
+function closeSheet(){const el=$('#sheet');el.hidden=true;el.innerHTML='';}
+function field(label,name,o){
+  o=o||{};
+  if(o.options){return '<label class="f">'+esc(label)+'<select name="'+name+'">'+o.options.map(x=>'<option value="'+esc(x[0])+'"'+(String(x[0])===String(o.value)?' selected':'')+'>'+esc(x[1])+'</option>').join('')+'</select></label>';}
+  if(o.area){return '<label class="f">'+esc(label)+'<textarea name="'+name+'"'+(o.required?' required':'')+(o.placeholder?' placeholder="'+esc(o.placeholder)+'"':'')+' maxlength="1000">'+esc(o.value||'')+'</textarea></label>';}
+  return '<label class="f">'+esc(label)+'<input name="'+name+'" type="'+(o.type||'text')+'" value="'+esc(o.value||'')+'"'+(o.required?' required':'')+(o.list?' list="'+o.list+'"':'')+(o.placeholder?' placeholder="'+esc(o.placeholder)+'"':'')+(o.type==='number'?' inputmode="numeric" min="0"':'')+'></label>';
+}
+const DL='<datalist id="cats"><option>Patient monitor<option>Ventilator<option>Suction machine<option>Infusion pump<option>Syringe pump<option>Incubator<option>Oxygen concentrator<option>Autoclave<option>ECG machine<option>Defibrillator<option>X-ray unit<option>Ultrasound<option>Lab analyser<option>Anaesthesia machine<option>Theatre light<option>BP apparatus<option>Nebuliser<option>Phototherapy unit</datalist><datalist id="wards"><option>Emergency<option>Theatre<option>ICU<option>Labour ward<option>Maternity<option>Paediatrics<option>Male ward<option>Female ward<option>Laboratory<option>Radiology<option>Outpatient<option>Store</datalist>';
+
+/* ---------- forms ---------- */
+function deviceForm(d){
+  const e=!!d;d=d||{};
+  sheet(e?'Edit device':'Add device',
+    DL+field('Device name','name',{required:true,value:d.name,placeholder:'e.g. Patient monitor'})+
+    field('Type','category',{list:'cats',value:d.category})+
+    '<div class="two">'+field('Make and model','model',{value:d.model})+field('Serial number','serial',{value:d.serial})+'</div>'+
+    field('Ward or location','ward',{required:true,list:'wards',value:d.ward})+
+    '<div class="two">'+field('Service schedule','ppmDays',{value:d.ppmDays||0,options:[[0,'No schedule'],[30,'Every month'],[90,'Every 3 months'],[180,'Every 6 months'],[365,'Every year']]})+
+    field('Last serviced','baseline',{type:'date',value:d.baseline||''})+'</div>',
+    async fd=>{
+      const row={name:fd.name,category:fd.category||null,model:fd.model||null,serial:fd.serial||null,ward:fd.ward,ppm_days:Number(fd.ppmDays),baseline:fd.baseline||null};
+      if(e){if(await run(sb.from('devices').update(row).eq('id',d.id),'Device updated'))closeSheet();}
+      else{
+        const r=await sb.from('devices').insert(row).select('id').single();
+        if(r.error){toast(r.error.message);return;}
+        closeSheet();await loadAll();toast('Added '+r.data.id);location.hash='#/d/'+r.data.id;render();
+      }
+    });
+}
+function faultForm(d){
+  sheet('Report fault - '+d.name,
+    field('What is wrong?','desc',{area:true,required:true,placeholder:'e.g. Screen blank, alarm sounding, no power'})+
+    '<div class="two">'+field('Priority','priority',{options:[['Normal','Normal'],['Urgent','Urgent - patient care affected']]})+field('Date','date',{type:'date',value:today(),required:true})+'</div>'+
+    field('Reported by','reporter',{placeholder:'Name or ward'}),
+    async fd=>{if(await run(sb.from('faults').insert({device_id:d.id,descr:fd.desc,priority:fd.priority,reporter:fd.reporter||null,reported_at:fd.date}),'Fault reported'))closeSheet();},'Report fault');
+}
+function serviceForm(d){
+  sheet('Log service - '+d.name,
+    '<div class="two">'+field('Type','type',{options:[['PPM','Planned maintenance'],['Calibration','Calibration'],['Safety check','Electrical safety check']]})+field('Date','date',{type:'date',value:today(),required:true})+'</div>'+
+    field('Notes','notes',{area:true,placeholder:'What was checked or replaced'})+field('Done by','by',{}),
+    async fd=>{if(await run(sb.from('services').insert({device_id:d.id,type:fd.type,service_date:fd.date,notes:fd.notes||null,by_name:fd.by||null}),'Service logged'))closeSheet();},'Log service');
+}
+function stageForm(f){
+  sheet('Update repair status',
+    field('Status','stage',{value:f.stage,options:[['Reported','Reported'],['In repair','In repair'],['Awaiting parts','Awaiting parts']]}),
+    async fd=>{if(await run(sb.from('faults').update({stage:fd.stage}).eq('id',f.id),'Status updated'))closeSheet();});
+}
+function resolveForm(f){
+  sheet('Mark as fixed',
+    '<div class="two">'+field('Date fixed','date',{type:'date',value:today(),required:true})+field('Repair cost (₦)','cost',{type:'number'})+'</div>'+
+    field('What was done?','action',{area:true,required:true,placeholder:'e.g. Replaced power supply board'}),
+    async fd=>{
+      if(dayNum(fd.date)<dayNum(f.reportedAt)){toast('Fixed date is before the report date');return;}
+      if(await run(sb.from('faults').update({resolved_at:fd.date,action:fd.action,cost:fd.cost===''?null:Number(fd.cost),stage:'Fixed'}).eq('id',f.id),'Marked as fixed'))closeSheet();
+    },'Mark as fixed');
+}
+
+/* ---------- QR ---------- */
+function qrPayload(id){return location.href.split('#')[0]+'#/r/'+id;}
+function qrSvg(id){
+  try{const q=qrcode(0,'M');q.addData(qrPayload(id));q.make();return q.createSvgTag({cellSize:4,margin:2,scalable:true});}
+  catch(e){return '<div class="small">QR could not be drawn. Use the ID '+esc(id)+'.</div>';}
+}
+
+/* ---------- engineer views ---------- */
+function devRow(d,extra){
+  const s=state(d),of=openFault(d);
+  let line='';
+  if(of)line='<div class="d">'+esc(of.desc)+'</div>';
+  else{const di=dueIn(d);if(di!==null)line='<div class="d muted">'+(di<0?'Service overdue by '+(-di)+' day'+(di===-1?'':'s'):di===0?'Service due today':'Next service in '+di+' day'+(di===1?'':'s'))+'</div>';}
+  return '<a class="tag" style="--c:'+s.c+'" href="#/d/'+esc(d.id)+'"><div class="t"><div><div class="n">'+esc(d.name)+'</div><div class="m">'+esc(d.id)+' · '+esc(d.ward)+'</div></div><span class="pill '+(s.k==='down'?'bad':s.k==='due'?'warn':s.k==='ok'?'ok':'off')+'">'+s.label+'</span></div>'+line+(extra||'')+'</a>';
+}
+
+function viewToday(){
+  const act=S.devices.filter(d=>!d.retired);
+  if(!S.devices.length){
+    return '<h1>Today</h1><p class="sub">'+fmt(today())+'</p><div class="empty"><b style="color:var(--ink)">No devices yet.</b><br>Add the first device on your ward, then print its QR label so staff can scan it to report faults.<div class="btnrow"><button class="btn primary" data-act="addDevice">Add a device</button></div></div>';
+  }
+  const down=act.filter(d=>openFault(d)),due=act.filter(d=>!openFault(d)&&dueIn(d)!==null&&dueIn(d)<0),ok=act.length-down.length-due.length;
+  const up=uptime30();
+  const faults=S.faults.filter(f=>!f.resolvedAt&&dev(f.deviceId)&&!dev(f.deviceId).retired).sort((a,b)=>(a.priority==='Urgent'?0:1)-(b.priority==='Urgent'?0:1)||dayNum(a.reportedAt)-dayNum(b.reportedAt));
+  const soon=act.filter(d=>{const x=dueIn(d);return x!==null&&x>=0&&x<=14;}).sort((a,b)=>dueIn(a)-dueIn(b));
+  const overdueList=act.filter(d=>dueIn(d)!==null&&dueIn(d)<0).sort((a,b)=>dueIn(a)-dueIn(b));
+  const cutoff=dayNum(today())-180;
+  const rep=act.map(d=>({d,n:S.faults.filter(f=>f.deviceId===d.id&&dayNum(f.reportedAt)>=cutoff).length})).filter(x=>x.n>=2).sort((a,b)=>b.n-a.n).slice(0,5);
+  let h='<div class="top"><h1>Today</h1><button class="btn" data-act="refresh" aria-label="Refresh data">Refresh</button></div><p class="sub">'+fmt(today())+(up!==null?' · '+up+'% equipment uptime, last 30 days':'')+'</p>';
+  h+='<div class="strip"><a href="#/devices?f=down" style="--c:var(--bad)"><b>'+down.length+'</b><span>Down</span></a><a href="#/devices?f=due" style="--c:var(--warn)"><b>'+due.length+'</b><span>Service overdue</span></a><a href="#/devices?f=ok" style="--c:var(--ok)"><b>'+ok+'</b><span>Working</span></a></div>';
+  h+='<div class="actions"><button class="btn primary wide" data-act="pickReport">Report a fault</button></div>';
+  h+='<div class="sec"><h2>Open faults <small>'+faults.length+'</small></h2>';
+  h+=faults.length?'<div class="list">'+faults.map(f=>{const d=dev(f.deviceId);return '<a class="tag" style="--c:var(--bad)" href="#/d/'+esc(d.id)+'"><div class="t"><div><div class="n">'+esc(d.name)+'</div><div class="m">'+esc(d.id)+' · '+esc(d.ward)+'</div></div>'+(f.priority==='Urgent'?'<span class="pill bad">Urgent</span>':'<span class="pill">'+esc(f.stage)+'</span>')+'</div><div class="d">'+esc(f.desc)+'</div><div class="m">Down '+daysOpen(f)+' day'+(daysOpen(f)===1?'':'s')+' · '+esc(f.stage)+(f.reporter?' · from '+esc(f.reporter):'')+'</div></a>';}).join('')+'</div>':'<div class="empty">No open faults. Everything reported has been fixed.</div>';
+  h+='</div>';
+  const mlist=overdueList.concat(soon);
+  h+='<div class="sec"><h2>Maintenance due <small>next 14 days</small></h2>';
+  h+=mlist.length?'<div class="list">'+mlist.map(d=>devRow(d)).join('')+'</div>':'<div class="empty">Nothing overdue or due soon.</div>';
+  h+='</div>';
+  if(rep.length){h+='<div class="sec"><h2>Repeat faults <small>last 6 months</small></h2><div class="list">'+rep.map(x=>devRow(x.d,'<div class="m">'+x.n+' faults. Consider replacing or a full service.</div>')).join('')+'</div></div>';}
+  return h;
+}
+
+let devFilter='all',devQuery='';
+function viewDevices(q){
+  if(q&&q.f)devFilter=q.f;
+  const chips=[['all','All'],['down','Down'],['due','Overdue'],['ok','Working'],['retired','Retired']];
+  let list=S.devices.slice();
+  if(devFilter!=='all')list=list.filter(d=>state(d).k===devFilter);
+  if(devQuery){const k=devQuery.toLowerCase();list=list.filter(d=>(d.name+' '+d.id+' '+d.ward+' '+(d.serial||'')+' '+(d.model||'')+' '+(d.category||'')).toLowerCase().includes(k));}
+  let h='<div class="top"><h1>Devices</h1><button class="btn primary" data-act="addDevice">Add device</button></div>';
+  h+='<p class="sub">'+S.devices.length+' registered</p>';
+  h+='<input class="search" id="q" type="search" placeholder="Search name, ID, ward or serial" value="'+esc(devQuery)+'" aria-label="Search devices">';
+  h+='<div class="chips" role="group" aria-label="Filter">'+chips.map(c=>'<button class="chip" data-act="filter" data-v="'+c[0]+'" aria-pressed="'+(devFilter===c[0])+'">'+c[1]+'</button>').join('')+'</div>';
+  h+=list.length?'<div class="list">'+list.sort((a,b)=>a.id.localeCompare(b.id)).map(d=>devRow(d)).join('')+'</div>':'<div class="empty">'+(S.devices.length?'No devices match.':'No devices yet. Tap Add device to register the first one.')+'</div>';
+  if(S.devices.length)h+='<p class="sub" style="margin-top:18px"><a href="#/labels" style="color:var(--brand);font-weight:600">View all QR labels</a></p>';
+  return h;
+}
+
+function viewDevice(id){
+  const d=dev(id);
+  if(!d)return '<div class="top"><a class="back" href="#/devices">‹ Devices</a></div><div class="empty">No device with ID <b>'+esc(id)+'</b>. Check the ID, or add the device first.</div>';
+  const s=state(d),of=openFault(d),di=dueIn(d);
+  let h='<div class="top"><a class="back" href="#/devices">‹ Devices</a></div>';
+  h+='<div class="hero" style="--c:'+s.c+'"><div class="band"><span>'+s.label+'</span><span>'+esc(d.id)+'</span></div><div class="body"><h1 style="font-size:24px">'+esc(d.name)+'</h1><div class="id">'+esc(d.ward)+(d.category?' · '+esc(d.category):'')+'</div>';
+  h+='<dl class="kv"><dt>Make and model</dt><dd>'+esc(d.model||'-')+'</dd><dt>Serial number</dt><dd>'+esc(d.serial||'-')+'</dd><dt>Service schedule</dt><dd>'+intervalLabel(d.ppmDays)+'</dd><dt>Last serviced</dt><dd>'+(d.ppmDays||d.baseline?fmt(lastService(d)):'-')+'</dd>'+(di!==null?'<dt>Next service</dt><dd>'+fmt(new Date((dayNum(lastService(d))+Number(d.ppmDays))*864e5).toISOString().slice(0,10))+(di<0?' ('+(-di)+' days overdue)':'')+'</dd>':'')+'</dl></div></div>';
+  if(of){
+    h+='<div class="fault"><div style="display:flex;justify-content:space-between;gap:8px"><h3>Open fault</h3><span class="pill bad">'+(of.priority==='Urgent'?'Urgent · ':'')+esc(of.stage)+'</span></div><p>'+esc(of.desc)+'</p><p class="small muted">Reported '+fmt(of.reportedAt)+(of.reporter?' by '+esc(of.reporter):'')+' · down '+daysOpen(of)+' day'+(daysOpen(of)===1?'':'s')+'</p><div class="btnrow"><button class="btn" data-act="stage" data-id="'+of.id+'">Update status</button><button class="btn primary" data-act="resolve" data-id="'+of.id+'">Mark as fixed</button></div></div>';
+  }
+  if(!d.retired){
+    h+='<div class="actions">'+(of?'':'<button class="btn primary" data-act="report" data-id="'+d.id+'">Report fault</button>')+'<button class="btn" data-act="service" data-id="'+d.id+'">Log service</button><a class="btn" href="#/label/'+esc(d.id)+'">QR label</a>'+(of?'<button class="btn" data-act="report" data-id="'+d.id+'">Report another fault</button>':'')+'</div>';
+  } else h+='<div class="actions"><a class="btn wide" href="#/label/'+esc(d.id)+'">QR label</a></div>';
+  const items=[];
+  S.faults.filter(f=>f.deviceId===d.id).forEach(f=>{items.push({date:f.reportedAt,c:'var(--bad)',t:'Fault: '+f.desc,m:(f.reporter?'Reported by '+f.reporter+'. ':'')+(f.resolvedAt?'Fixed '+fmt(f.resolvedAt)+' after '+daysOpen(f)+' day'+(daysOpen(f)===1?'':'s')+'. '+f.action+(f.cost!==''&&f.cost!=null?' Cost '+naira(f.cost)+'.':''):'Still open.')});});
+  S.services.filter(x=>x.deviceId===d.id).forEach(x=>{items.push({date:x.date,c:'var(--brand)',t:(x.type==='PPM'?'Planned maintenance':x.type),m:[x.notes,x.by?'By '+x.by:''].filter(Boolean).join('. ')});});
+  items.sort((a,b)=>b.date.localeCompare(a.date));
+  h+='<div class="sec"><h2>History</h2>';
+  h+=items.length?'<ul class="tl">'+items.map(i=>'<li style="--c:'+i.c+'"><div class="when">'+fmt(i.date)+'</div><div><b>'+esc(i.t)+'</b></div>'+(i.m?'<div class="small muted">'+esc(i.m)+'</div>':'')+'</li>').join('')+'</ul>':'<div class="empty">No history yet.</div>';
+  h+='</div>';
+  h+='<div class="actions" style="margin-top:8px"><button class="btn" data-act="edit" data-id="'+d.id+'">Edit details</button><button class="btn" data-act="retire" data-id="'+d.id+'">'+(d.retired?'Bring back into use':'Retire device')+'</button><button class="btn danger wide" data-act="delete" data-id="'+d.id+'">Delete device and its history</button></div>';
+  return h;
+}
+
+function viewLabel(id){
+  const d=dev(id);if(!d)return viewDevice(id);
+  return '<div class="top"><a class="back" href="#/d/'+esc(d.id)+'">‹ '+esc(d.name)+'</a><button class="btn noprint" data-act="print">Print</button></div><div class="labelbig"><div class="qr">'+qrSvg(d.id)+'</div><b>'+esc(d.id)+'</b><div>'+esc(d.name)+'</div><div class="small" style="color:#555">'+esc(d.ward)+'</div></div><div class="note noprint">Staff scan this code with the phone camera to open the fault report form. Print it and stick it on the device.</div>';
+}
+function viewLabels(){
+  if(!S.devices.length)return '<div class="top"><a class="back" href="#/devices">‹ Devices</a></div><div class="empty">Add devices first.</div>';
+  return '<div class="top"><a class="back" href="#/devices">‹ Devices</a><button class="btn noprint" data-act="print">Print</button></div><h1>QR labels</h1><p class="sub noprint">One label per active device.</p><div class="grid">'+S.devices.filter(d=>!d.retired).sort((a,b)=>a.id.localeCompare(b.id)).map(d=>'<div class="lab"><div class="qr">'+qrSvg(d.id)+'</div><b>'+esc(d.id)+'</b><span>'+esc(d.name)+'<br>'+esc(d.ward)+'</span></div>').join('')+'</div>';
+}
+
+let stream=null,scanRaf=0,scanning=false;
+function viewScan(){
+  return '<h1>Scan</h1><p class="sub">Point the camera at a device QR label.</p><div class="cam" id="cam"><video id="vid" playsinline muted></video><div class="frame"></div></div><div id="scanMsg" class="note">Starting camera...</div><input type="file" id="shot" accept="image/*" capture="environment" hidden><button class="btn primary block" style="margin-top:12px" data-act="shot">Take photo of QR label</button><label class="f">Or type the device ID<input id="manual" placeholder="EQ-0001" autocapitalize="characters" autocomplete="off"></label><div class="btnrow"><button class="btn" data-act="manualGo">Open device</button></div>';
+}
+function startScan(){
+  const vid=$('#vid'),msg=$('#scanMsg');if(!vid)return;
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg.textContent='Live camera is not available here. Tap Take photo of QR label instead, or type the device ID.';$('#cam').style.display='none';return;}
+  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}}).then(s=>{
+    stream=s;scanning=true;vid.srcObject=s;vid.play();msg.textContent='Looking for a QR code...';
+    const cv=document.createElement('canvas'),cx=cv.getContext('2d',{willReadFrequently:true});
+    const tick=()=>{
+      if(!scanning)return;
+      if(vid.readyState>=2&&typeof jsQR==='function'){
+        cv.width=vid.videoWidth;cv.height=vid.videoHeight;cx.drawImage(vid,0,0);
+        const im=cx.getImageData(0,0,cv.width,cv.height),r=jsQR(im.data,im.width,im.height);
+        if(r&&r.data){const id=parseId(r.data);if(id){stopScan();location.hash='#/d/'+id;return;}msg.textContent='That code is not an equipment label.';}
+      }
+      scanRaf=requestAnimationFrame(tick);
+    };tick();
+  }).catch(()=>{msg.textContent='Live camera is blocked. Tap Take photo of QR label instead, or type the device ID.';$('#cam').style.display='none';});
+}
+function decodePhoto(file){
+  const msg=$('#scanMsg');msg.textContent='Reading photo...';
+  const img=new Image(),url=URL.createObjectURL(file);
+  img.onload=()=>{
+    URL.revokeObjectURL(url);
+    let found=null;
+    [1000,640,1600].forEach(max=>{
+      if(found||typeof jsQR!=='function')return;
+      const k=Math.min(1,max/Math.max(img.width,img.height)),cv=document.createElement('canvas');
+      cv.width=Math.round(img.width*k);cv.height=Math.round(img.height*k);
+      const cx=cv.getContext('2d',{willReadFrequently:true});cx.drawImage(img,0,0,cv.width,cv.height);
+      const im=cx.getImageData(0,0,cv.width,cv.height),r=jsQR(im.data,im.width,im.height,{inversionAttempts:'attemptBoth'});
+      if(r&&r.data)found=parseId(r.data);
+    });
+    if(found){location.hash='#/d/'+found;}
+    else{msg.textContent='No QR code found. Move closer, keep the label flat and well lit, then try again.';}
+  };
+  img.onerror=()=>{msg.textContent='Could not open that photo. Try again.';};
+  img.src=url;
+}
+function stopScan(){scanning=false;cancelAnimationFrame(scanRaf);if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}
+function parseId(t){const m=String(t).match(/EQ-\d{4,}/i);return m?m[0].toUpperCase():null;}
+
+function viewMore(){
+  return '<h1>Account</h1><p class="sub">Signed in as '+esc(session&&session.user.email)+'</p>'+
+  '<div class="list">'+
+  '<div class="tag" style="--c:var(--brand)"><div class="n">Fault log for reports</div><div class="m">Spreadsheet of every fault with days down and cost.</div><div class="btnrow"><button class="btn" data-act="exportCsv">Download fault log (CSV)</button></div></div>'+
+  '<div class="tag" style="--c:var(--brand)"><div class="n">Full backup</div><div class="m">All devices, faults and services as one file. Keep a copy somewhere safe each month.</div><div class="btnrow"><button class="btn" data-act="exportJson">Download backup</button></div></div>'+
+  '<div class="tag" style="--c:var(--retired)"><div class="n">Data</div><div class="m">'+S.devices.length+' devices · '+S.faults.length+' faults · '+S.services.length+' services</div><div class="btnrow"><button class="btn" data-act="signout">Sign out</button></div></div></div>';
+}
+
+/* ---------- login ---------- */
+function viewLogin(){
+  return '<h1>Equipment Tracker</h1><p class="sub">Sign in to manage devices and faults.</p><form id="loginForm"><label class="f">Email<input name="email" type="email" autocomplete="username" required></label><label class="f">Password<input name="password" type="password" autocomplete="current-password" required></label><div id="loginErr" class="note" style="display:none;color:var(--bad)"></div><div class="btnrow"><button class="btn primary">Sign in</button></div></form><div class="note">Reporting a fault? You do not need to sign in. Scan the QR label on the device.</div>';
+}
+
+/* ---------- public report page ---------- */
+async function renderPublic(id){
+  const app=$('#app');
+  app.innerHTML='<h1>Report a fault</h1><p class="sub">Loading device...</p>';
+  const r=await sb.rpc('get_device_public',{p_id:id});
+  if(r.error){app.innerHTML='<h1>Report a fault</h1><div class="empty">Could not reach the server. Check your connection and scan again.</div>';return;}
+  const d=r.data&&r.data[0];
+  if(!d){app.innerHTML='<h1>Report a fault</h1><div class="empty">This device was not found, or it has been retired. Check the label and try again.</div>';return;}
+  app.innerHTML='<h1>Report a fault</h1><div class="hero" style="--c:var(--brand);margin-top:12px"><div class="band"><span>'+esc(d.id)+'</span></div><div class="body"><h3 style="font-size:20px">'+esc(d.name)+'</h3><div class="id">'+esc(d.ward)+'</div></div></div>'+
+  '<form id="pubForm"><label class="f">What is wrong?<textarea name="desc" required maxlength="1000" placeholder="e.g. Screen blank, alarm sounding, no power"></textarea></label>'+
+  '<label class="f">Priority<select name="priority"><option value="Normal">Normal</option><option value="Urgent">Urgent - patient care affected</option></select></label>'+
+  '<label class="f">Your name and ward<input name="reporter" maxlength="80" placeholder="e.g. Nurse Ada, ICU"></label>'+
+  '<div class="btnrow"><button class="btn primary">Send report</button></div></form>'+
+  (session?'<p class="sub" style="margin-top:18px"><a href="#/d/'+esc(d.id)+'" style="color:var(--brand);font-weight:600">Open full device record</a></p>':'');
+  $('#pubForm').addEventListener('submit',async e=>{
+    e.preventDefault();const f=e.target,btn=f.querySelector('.primary');btn.disabled=true;
+    const fd=new FormData(f);
+    const res=await sb.rpc('report_fault',{p_id:d.id,p_desc:String(fd.get('desc')||''),p_priority:String(fd.get('priority')||'Normal'),p_reporter:String(fd.get('reporter')||'')});
+    btn.disabled=false;
+    if(res.error){toast('Could not send. Check your connection and try again.');return;}
+    const msgs={ok:['Fault reported','The biomedical engineering unit will see it on their dashboard.'],duplicate:['Already reported','This device already has a fault waiting for repair. No need to report it again.'],invalid:['Description needed','Describe what is wrong and send again.'],not_found:['Device not found','Check the label and try again.']};
+    const m=msgs[res.data]||['Something went wrong','Please try again.'];
+    if(res.data==='invalid'||!msgs[res.data]){toast(m[1]);return;}
+    $('#app').innerHTML='<h1>'+m[0]+'</h1><div class="empty" style="margin-top:14px">'+m[1]+'<div class="btnrow"><button class="btn" data-act="again" data-id="'+esc(d.id)+'">Report another problem</button></div></div>';
+  });
+}
+
+/* ---------- export ---------- */
+function saveFile(name,text,type){
+  const blob=new Blob([text],{type:type||'text/plain'});const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);toast('Saved '+name);
+}
+function csvCell(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
+function exportCsv(){
+  const rows=[['Device ID','Device','Ward','Reported','Priority','Fault','Reported by','Stage','Fixed on','Days down','Action taken','Cost (NGN)']];
+  S.faults.slice().sort((a,b)=>b.reportedAt.localeCompare(a.reportedAt)).forEach(f=>{const d=dev(f.deviceId)||{};rows.push([d.id,d.name,d.ward,f.reportedAt,f.priority,f.desc,f.reporter,f.stage,f.resolvedAt||'',daysOpen(f),f.action,f.cost]);});
+  saveFile('fault-log-'+today()+'.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'),'text/csv');
+}
+
+/* ---------- router ---------- */
+function render(){
+  stopScan();
+  const raw=location.hash.slice(1)||'/';
+  const qi=raw.indexOf('?');const path=qi>=0?raw.slice(0,qi):raw;
+  const q={};if(qi>=0)raw.slice(qi+1).split('&').forEach(p=>{const kv=p.split('=');q[kv[0]]=decodeURIComponent(kv[1]||'');});
+  const p=path.split('/').filter(Boolean);
+  const navEl=$('nav.bar');
+  if(p[0]==='r'){navEl.style.display='none';renderPublic(decodeURIComponent(p[1]||'').toUpperCase());return;}
+  if(!session){navEl.style.display='none';$('#app').innerHTML=viewLogin();bindLogin();return;}
+  navEl.style.display='';
+  if(!loaded){$('#app').innerHTML='<h1>Loading...</h1>';return;}
+  let h,nav='today';
+  switch(p[0]){
+    case 'devices':nav='devices';h=viewDevices(q);break;
+    case 'd':nav='devices';h=viewDevice(decodeURIComponent(p[1]||''));break;
+    case 'label':nav='devices';h=viewLabel(decodeURIComponent(p[1]||''));break;
+    case 'labels':nav='devices';h=viewLabels();break;
+    case 'scan':nav='scan';h=viewScan();break;
+    case 'more':nav='more';h=viewMore();break;
+    default:h=viewToday();
+  }
+  $('#app').innerHTML=h;
+  document.querySelectorAll('nav.bar a').forEach(a=>{if(a.dataset.nav===nav)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});
+  if(p[0]==='scan'){startScan();const sh=$('#shot');if(sh)sh.addEventListener('change',e=>{const f=e.target.files[0];if(f)decodePhoto(f);});}
+  const qEl=$('#q');if(qEl)qEl.addEventListener('input',e=>{devQuery=e.target.value;const pos=e.target.selectionStart;render();const n=$('#q');if(n){n.focus();n.setSelectionRange(pos,pos);}});
+}
+function bindLogin(){
+  const f=$('#loginForm');if(!f)return;
+  f.addEventListener('submit',async e=>{
+    e.preventDefault();const btn=f.querySelector('.primary'),err=$('#loginErr');btn.disabled=true;err.style.display='none';
+    const fd=new FormData(f);
+    const r=await sb.auth.signInWithPassword({email:String(fd.get('email')).trim(),password:String(fd.get('password'))});
+    btn.disabled=false;
+    if(r.error){err.textContent='Wrong email or password, or no connection.';err.style.display='block';}
+  });
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click',async e=>{
+  const t=e.target.closest('[data-act]');if(!t)return;
+  const a=t.dataset.act,id=t.dataset.id;
+  switch(a){
+    case 'closeSheet':closeSheet();break;
+    case 'addDevice':deviceForm();break;
+    case 'filter':devFilter=t.dataset.v;render();break;
+    case 'refresh':if(await loadAll()){render();toast('Up to date');}break;
+    case 'edit':deviceForm(dev(id));break;
+    case 'report':faultForm(dev(id));break;
+    case 'service':serviceForm(dev(id));break;
+    case 'stage':stageForm(S.faults.find(f=>f.id===id));break;
+    case 'resolve':resolveForm(S.faults.find(f=>f.id===id));break;
+    case 'retire':{const d=dev(id);await run(sb.from('devices').update({retired:!d.retired}).eq('id',id),d.retired?'Back in use':'Device retired');break;}
+    case 'delete':if(confirm('Delete this device and all its fault and service history? This cannot be undone.')){if(await run(sb.from('devices').delete().eq('id',id),'Device deleted'))location.hash='#/devices';}break;
+    case 'print':try{window.print();}catch(x){toast('Printing is not available here. Take a screenshot instead.');}break;
+    case 'pickReport':{
+      const act=S.devices.filter(d=>!d.retired);
+      if(!act.length){toast('Add a device first');break;}
+      sheet('Which device?','<label class="f">Device<select name="id">'+act.map(d=>'<option value="'+esc(d.id)+'">'+esc(d.id)+' · '+esc(d.name)+' · '+esc(d.ward)+'</option>').join('')+'</select></label>',fd=>{closeSheet();faultForm(dev(fd.id));},'Next');break;}
+    case 'shot':$('#shot').click();break;
+    case 'manualGo':{const pid=parseId(($('#manual').value||'').trim());if(pid)location.hash='#/d/'+pid;else toast('Enter an ID like EQ-0001');break;}
+    case 'exportJson':saveFile('equipment-backup-'+today()+'.json',JSON.stringify(S,null,2),'application/json');break;
+    case 'exportCsv':exportCsv();break;
+    case 'signout':await sb.auth.signOut();break;
+    case 'again':location.hash='#/r/'+id;renderPublic(id);break;
+  }
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape')closeSheet();
+  if(e.key==='Enter'&&e.target.id==='manual'){e.preventDefault();const pid=parseId(e.target.value);if(pid)location.hash='#/d/'+pid;else toast('Enter an ID like EQ-0001');}
+});
+window.addEventListener('hashchange',()=>{closeSheet();render();window.scrollTo(0,0);});
+
+/* ---------- boot ---------- */
+sb.auth.onAuthStateChange(async (ev,s)=>{
+  const was=!!session;session=s;
+  if(session&&!was){await loadAll();render();}
+  else if(!session&&was){S={devices:[],faults:[],services:[]};loaded=false;render();}
+});
+(async function init(){
+  const r=await sb.auth.getSession();session=r.data&&r.data.session;
+  if(session)await loadAll();
+  render();
+})();
+setInterval(()=>{
+  if(!session||document.hidden||!$('#sheet').hidden)return;
+  const h=location.hash;if(h===''||h==='#/'||h==='#'){loadAll().then(ok=>{if(ok)render();});}
+},60000);
+})();
+
+</script>
+</body>
+</html>
