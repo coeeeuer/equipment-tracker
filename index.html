@@ -188,7 +188,7 @@ function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');cl
 
 /* ---------- state ---------- */
 let S={devices:[],faults:[],services:[]};
-let session=null,loaded=false,loading=false;
+let session=null,loaded=false,loading=false,lastSig='',dataChanged=false;
 const dev=id=>S.devices.find(d=>d.id===id);
 const openFault=d=>S.faults.find(f=>f.deviceId===d.id&&!f.resolvedAt);
 function lastService(d){let best=d.baseline||d.added;S.services.forEach(s=>{if(s.deviceId===d.id&&s.date>best)best=s.date;});return best;}
@@ -225,6 +225,7 @@ async function loadAll(){
     S.devices=d.data.map(x=>({id:x.id,name:x.name,category:x.category||'',model:x.model||'',serial:x.serial||'',ward:x.ward,ppmDays:x.ppm_days||0,baseline:x.baseline||'',added:x.added,retired:x.retired}));
     S.faults=f.data.map(x=>({id:x.id,deviceId:x.device_id,desc:x.descr,priority:x.priority,reporter:x.reporter||'',reportedAt:x.reported_at,stage:x.stage,resolvedAt:x.resolved_at,action:x.action||'',cost:x.cost==null?'':x.cost}));
     S.services=s.data.map(x=>({id:x.id,deviceId:x.device_id,type:x.type,date:x.service_date,notes:x.notes||'',by:x.by_name||''}));
+    const sig=JSON.stringify([S.devices,S.faults,S.services]);dataChanged=sig!==lastSig;lastSig=sig;
     loaded=true;
     return true;
   }catch(e){toast('Could not reach the server. Check your connection.');return false;}
@@ -582,10 +583,21 @@ sb.auth.onAuthStateChange(async (ev,s)=>{
   if(session)await loadAll();
   render();
 })();
-setInterval(()=>{
+function autoRefresh(){
   if(!session||document.hidden||!$('#sheet').hidden)return;
-  const h=location.hash;if(h===''||h==='#/'||h==='#'){loadAll().then(ok=>{if(ok)render();});}
-},60000);
+  const h=location.hash;if(h.indexOf('#/r/')===0||h.indexOf('#/scan')===0)return;
+  const ae=document.activeElement;if(ae&&/INPUT|TEXTAREA|SELECT/.test(ae.tagName))return;
+  const before=new Set(S.faults.filter(f=>!f.resolvedAt).map(f=>f.id));
+  loadAll().then(ok=>{
+    if(!ok||!dataChanged)return;
+    const fresh=S.faults.some(f=>!f.resolvedAt&&!before.has(f.id));
+    render();
+    if(fresh)toast('New fault reported');
+  });
+}
+setInterval(autoRefresh,15000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)autoRefresh();});
+window.addEventListener('focus',autoRefresh);
 })();
 
 </script>
