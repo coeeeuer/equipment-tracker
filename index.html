@@ -152,6 +152,22 @@ label.f textarea{min-height:84px;resize:vertical}
   #app{padding:0;max-width:none}
   .grid{grid-template-columns:repeat(4,1fr)}
 }
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:14px 0 0}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.stat b{display:block;font-size:24px;line-height:1.1;font-weight:700}
+.stat span{font-size:13px;color:var(--muted)}
+.tbl{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.tbl table{border-collapse:collapse;width:100%;font-size:14px;min-width:520px}
+.tbl th,.tbl td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.tbl th{font-weight:650;color:var(--muted);font-size:13px}
+.tbl tr:last-child td{border-bottom:0}
+.rhead{display:none}
+@media print{
+  .rhead{display:block;margin-bottom:10px}
+  .stat,.tbl{border-color:#bbb;background:#fff;color:#111}
+  .tbl{overflow:visible}
+  body,.sub,.muted,.stat span,.tbl th{color:#111}
+}
 </style>
 </head>
 <body>
@@ -449,9 +465,45 @@ function parseId(t){const m=String(t).match(/EQ-\d{4,}/i);return m?m[0].toUpperC
 function viewMore(){
   return '<h1>Account</h1><p class="sub">Signed in as '+esc(session&&session.user.email)+'</p>'+
   '<div class="list">'+
+  '<div class="tag" style="--c:var(--brand)"><div class="n">Monthly report</div><div class="m">Uptime, faults, costs and overdue servicing, ready to print for management.</div><div class="btnrow"><a class="btn primary" href="#/report">Open monthly report</a></div></div>'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Fault log for reports</div><div class="m">Spreadsheet of every fault with days down and cost.</div><div class="btnrow"><button class="btn" data-act="exportCsv">Download fault log (CSV)</button></div></div>'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Full backup</div><div class="m">All devices, faults and services as one file. Keep a copy somewhere safe each month.</div><div class="btnrow"><button class="btn" data-act="exportJson">Download backup</button></div></div>'+
   '<div class="tag" style="--c:var(--retired)"><div class="n">Data</div><div class="m">'+S.devices.length+' devices · '+S.faults.length+' faults · '+S.services.length+' services</div><div class="btnrow"><button class="btn" data-act="signout">Sign out</button></div></div></div>';
+}
+
+/* ---------- monthly report ---------- */
+let reportMonth='';
+function monthRange(m){const a=m.split('-').map(Number),y=a[0],mo=a[1];const last=new Date(Date.UTC(y,mo,0)).getUTCDate();return {start:y+'-'+pad(mo)+'-01',end:y+'-'+pad(mo)+'-'+pad(last),label:new Date(Date.UTC(y,mo-1,1)).toLocaleDateString('en-GB',{month:'long',year:'numeric',timeZone:'UTC'})};}
+function viewReport(){
+  if(!reportMonth)reportMonth=today().slice(0,7);
+  const r=monthRange(reportMonth),a=dayNum(r.start),b=dayNum(r.end),t=dayNum(today());
+  const act=S.devices.filter(d=>!d.retired);
+  let h='<div class="top noprint"><a class="back" href="#/more">‹ Account</a><button class="btn" data-act="print">Print or save PDF</button></div>';
+  h+='<div class="rhead"><h1>Equipment report: '+esc(r.label)+'</h1><div>Prepared '+fmt(today())+'</div></div>';
+  h+='<h1 class="noprint">Monthly report</h1><label class="f noprint">Month<input id="rm" type="month" value="'+esc(reportMonth)+'"></label>';
+  if(!act.length)return h+'<div class="empty" style="margin-top:14px">No active devices yet.</div>';
+  const dt={};let down=0;
+  act.forEach(d=>{const set=new Set();S.faults.forEach(f=>{if(f.deviceId!==d.id)return;const x=Math.max(dayNum(f.reportedAt),a),y=Math.min(f.resolvedAt?dayNum(f.resolvedAt):t,b);for(let i=x;i<=y;i++)set.add(i);});dt[d.id]=set.size;down+=set.size;});
+  const elapsed=Math.max(1,Math.min(b,t)-a+1);
+  const up=Math.max(0,Math.round(100*(1-down/(act.length*elapsed))));
+  const inM=x=>x&&dayNum(x)>=a&&dayNum(x)<=b;
+  const reported=S.faults.filter(f=>inM(f.reportedAt)).sort((x,y)=>x.reportedAt.localeCompare(y.reportedAt));
+  const fixed=S.faults.filter(f=>inM(f.resolvedAt));
+  const stillOpen=S.faults.filter(f=>dayNum(f.reportedAt)<=b&&(!f.resolvedAt||dayNum(f.resolvedAt)>b));
+  const avg=fixed.length?(fixed.reduce((n,f)=>n+daysOpen(f),0)/fixed.length):0;
+  const cost=fixed.reduce((n,f)=>n+(f.cost===''||f.cost==null?0:Number(f.cost)),0);
+  const svc=S.services.filter(x=>inM(x.date));
+  const top=act.filter(d=>dt[d.id]>0).sort((x,y)=>dt[y.id]-dt[x.id]).slice(0,5);
+  const overdue=act.filter(d=>{const di=dueIn(d);return di!==null&&di<0;}).sort((x,y)=>dueIn(x)-dueIn(y));
+  h+='<div class="stats"><div class="stat"><b>'+up+'%</b><span>Equipment uptime</span></div><div class="stat"><b>'+act.length+'</b><span>Active devices</span></div><div class="stat"><b>'+reported.length+'</b><span>Faults reported</span></div><div class="stat"><b>'+fixed.length+'</b><span>Faults fixed</span></div><div class="stat"><b>'+(fixed.length?avg.toFixed(1):'-')+'</b><span>Average days to fix</span></div><div class="stat"><b>'+naira(cost)+'</b><span>Repair cost</span></div><div class="stat"><b>'+svc.length+'</b><span>Services logged</span></div><div class="stat"><b>'+stillOpen.length+'</b><span>Still open at month end</span></div></div>';
+  h+='<div class="sec"><h2>Most downtime</h2>';
+  h+=top.length?'<div class="tbl"><table><tr><th>Device</th><th>Ward</th><th>Days down</th></tr>'+top.map(d=>'<tr><td>'+esc(d.name)+' <span class="muted">'+esc(d.id)+'</span></td><td>'+esc(d.ward)+'</td><td>'+dt[d.id]+'</td></tr>').join('')+'</table></div>':'<div class="empty">No downtime this month.</div>';
+  h+='</div><div class="sec"><h2>Faults reported</h2>';
+  h+=reported.length?'<div class="tbl"><table><tr><th>Date</th><th>Device</th><th>Fault</th><th>Days down</th><th>Cost</th></tr>'+reported.map(f=>{const d=dev(f.deviceId)||{name:'(deleted)',ward:''};return '<tr><td>'+fmt(f.reportedAt)+'</td><td>'+esc(d.name)+'<br><span class="muted">'+esc(d.ward)+'</span></td><td>'+esc(f.desc)+(f.action?'<br><span class="muted">Fix: '+esc(f.action)+'</span>':'')+'</td><td>'+daysOpen(f)+(f.resolvedAt?'':' (open)')+'</td><td>'+(f.cost===''||f.cost==null?'-':naira(f.cost))+'</td></tr>';}).join('')+'</table></div>':'<div class="empty">No faults reported this month.</div>';
+  h+='</div><div class="sec"><h2>Services overdue now</h2>';
+  h+=overdue.length?'<div class="tbl"><table><tr><th>Device</th><th>Ward</th><th>Overdue by</th></tr>'+overdue.map(d=>'<tr><td>'+esc(d.name)+' <span class="muted">'+esc(d.id)+'</span></td><td>'+esc(d.ward)+'</td><td>'+(-dueIn(d))+' days</td></tr>').join('')+'</table></div>':'<div class="empty">Nothing overdue.</div>';
+  h+='</div>';
+  return h;
 }
 
 /* ---------- login ---------- */
@@ -519,11 +571,13 @@ function render(){
     case 'labels':nav='devices';h=viewLabels();break;
     case 'scan':nav='scan';h=viewScan();break;
     case 'more':nav='more';h=viewMore();break;
+    case 'report':nav='more';h=viewReport();break;
     default:h=viewToday();
   }
   $('#app').innerHTML=h;
   document.querySelectorAll('nav.bar a').forEach(a=>{if(a.dataset.nav===nav)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});
   if(p[0]==='scan'){startScan();const sh=$('#shot');if(sh)sh.addEventListener('change',e=>{const f=e.target.files[0];if(f)decodePhoto(f);});}
+  const rm=$('#rm');if(rm)rm.addEventListener('change',e=>{if(e.target.value){reportMonth=e.target.value;render();}});
   const qEl=$('#q');if(qEl)qEl.addEventListener('input',e=>{devQuery=e.target.value;const pos=e.target.selectionStart;render();const n=$('#q');if(n){n.focus();n.setSelectionRange(pos,pos);}});
 }
 function bindLogin(){
