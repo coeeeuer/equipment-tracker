@@ -4,11 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Equipment Tracker</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0F5E6B">
+<link rel="icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{
   --bg:#EDF1F0;--surface:#FFFFFF;--ink:#12262B;--muted:#5D7176;--line:#D3DDDB;
@@ -238,8 +242,8 @@ async function loadAll(){
       sb.from('services').select('*').order('service_date',{ascending:false}).limit(5000)
     ]);
     if(d.error||f.error||s.error){toast('Could not load data. Check your connection.');return false;}
-    S.devices=d.data.map(x=>({id:x.id,name:x.name,category:x.category||'',model:x.model||'',serial:x.serial||'',ward:x.ward,ppmDays:x.ppm_days||0,baseline:x.baseline||'',added:x.added,retired:x.retired,critical:!!x.critical}));
-    S.faults=f.data.map(x=>({id:x.id,deviceId:x.device_id,desc:x.descr,priority:x.priority,reporter:x.reporter||'',reportedAt:x.reported_at,stage:x.stage,resolvedAt:x.resolved_at,action:x.action||'',cost:x.cost==null?'':x.cost}));
+    S.devices=d.data.map(x=>({id:x.id,name:x.name,category:x.category||'',model:x.model||'',serial:x.serial||'',ward:x.ward,ppmDays:x.ppm_days||0,baseline:x.baseline||'',added:x.added,retired:x.retired,critical:!!x.critical,warrantyUntil:x.warranty_until||'',vendor:x.vendor||'',vendorPhone:x.vendor_phone||''}));
+    S.faults=f.data.map(x=>({id:x.id,deviceId:x.device_id,desc:x.descr,priority:x.priority,reporter:x.reporter||'',reportedAt:x.reported_at,stage:x.stage,resolvedAt:x.resolved_at,action:x.action||'',cost:x.cost==null?'':x.cost,photoPath:x.photo_path||''}));
     S.services=s.data.map(x=>({id:x.id,deviceId:x.device_id,type:x.type,date:x.service_date,notes:x.notes||'',by:x.by_name||''}));
     const sig=JSON.stringify([S.devices,S.faults,S.services]);dataChanged=sig!==lastSig;lastSig=sig;
     loaded=true;
@@ -289,9 +293,11 @@ function deviceForm(d){
     field('Ward or location','ward',{required:true,list:'wards',value:d.ward})+
     '<label class="f" style="display:flex;gap:10px;align-items:center"><input type="checkbox" name="critical" value="1" style="width:auto;margin:0;min-height:0"'+(d.critical?' checked':'')+'> Critical equipment (life support or emergency use)</label>'+
     '<div class="two">'+field('Service schedule','ppmDays',{value:d.ppmDays||0,options:[[0,'No schedule'],[30,'Every month'],[90,'Every 3 months'],[180,'Every 6 months'],[365,'Every year']]})+
-    field('Last serviced','baseline',{type:'date',value:d.baseline||''})+'</div>',
+    field('Last serviced','baseline',{type:'date',value:d.baseline||''})+'</div>'+
+    '<div class="two">'+field('Warranty ends','warrantyUntil',{type:'date',value:d.warrantyUntil||''})+field('Vendor or supplier','vendor',{value:d.vendor})+'</div>'+
+    field('Vendor phone','vendorPhone',{type:'tel',value:d.vendorPhone}),
     async fd=>{
-      const row={name:fd.name,category:fd.category||null,model:fd.model||null,serial:fd.serial||null,ward:fd.ward,ppm_days:Number(fd.ppmDays),baseline:fd.baseline||null,critical:fd.critical==='1'};
+      const row={name:fd.name,category:fd.category||null,model:fd.model||null,serial:fd.serial||null,ward:fd.ward,ppm_days:Number(fd.ppmDays),baseline:fd.baseline||null,critical:fd.critical==='1',warranty_until:fd.warrantyUntil||null,vendor:fd.vendor||null,vendor_phone:fd.vendorPhone||null};
       if(e){if(await run(sb.from('devices').update(row).eq('id',d.id),'Device updated'))closeSheet();}
       else{
         const r=await sb.from('devices').insert(row).select('id').single();
@@ -300,12 +306,44 @@ function deviceForm(d){
       }
     });
 }
+async function compressImage(file){
+  return new Promise((resolve,reject)=>{
+    const img=new Image(),url=URL.createObjectURL(file);
+    img.onload=()=>{
+      URL.revokeObjectURL(url);
+      const k=Math.min(1,1280/Math.max(img.width,img.height)),cv=document.createElement('canvas');
+      cv.width=Math.round(img.width*k);cv.height=Math.round(img.height*k);
+      cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+      cv.toBlob(b=>b?resolve(b):reject(new Error('compress')),'image/jpeg',0.7);
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('load'));};
+    img.src=url;
+  });
+}
+async function uploadPhoto(file){
+  try{
+    const blob=await compressImage(file);
+    const name=(crypto.randomUUID?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&3|8)).toString(16);}))+'.jpg';
+    const r=await sb.storage.from('fault-photos').upload(name,blob,{contentType:'image/jpeg',upsert:false});
+    return r.error?null:name;
+  }catch(e){return null;}
+}
+async function showPhoto(path){
+  const r=await sb.storage.from('fault-photos').createSignedUrl(path,300);
+  if(r.error||!r.data){toast('Could not load the photo');return;}
+  sheet('Fault photo','<img src="'+esc(r.data.signedUrl)+'" alt="Photo of the fault" style="width:100%;border-radius:10px;display:block">',()=>closeSheet(),'Close');
+}
 function faultForm(d){
   sheet('Report fault - '+d.name,
     field('What is wrong?','desc',{area:true,required:true,placeholder:'e.g. Screen blank, alarm sounding, no power'})+
     '<div class="two">'+field('Priority','priority',{options:[['Normal','Normal'],['Urgent','Urgent - patient care affected']]})+field('Date','date',{type:'date',value:today(),required:true})+'</div>'+
-    field('Reported by','reporter',{placeholder:'Name or ward'}),
-    async fd=>{if(await run(sb.from('faults').insert({device_id:d.id,descr:fd.desc,priority:fd.priority,reporter:fd.reporter||null,reported_at:fd.date}),'Fault reported'))closeSheet();},'Report fault');
+    field('Reported by','reporter',{placeholder:'Name or ward'})+
+    '<label class="f">Photo (optional)<input name="photo" type="file" accept="image/*"></label>',
+    async fd=>{
+      let pp=null;
+      if(fd.photo&&fd.photo.size){pp=await uploadPhoto(fd.photo);if(!pp)toast('Photo could not be uploaded. Saving the fault without it.');}
+      if(await run(sb.from('faults').insert({device_id:d.id,descr:fd.desc,priority:fd.priority,reporter:fd.reporter||null,reported_at:fd.date,photo_path:pp}),'Fault reported'))closeSheet();
+    },'Report fault');
 }
 function serviceForm(d){
   sheet('Log service - '+d.name,
@@ -366,6 +404,8 @@ function viewToday(){
   h+='<div class="sec"><h2>Maintenance due <small>next 14 days</small></h2>';
   h+=mlist.length?'<div class="list">'+mlist.map(d=>devRow(d)).join('')+'</div>':'<div class="empty">Nothing overdue or due soon.</div>';
   h+='</div>';
+  const warr=act.filter(d=>d.warrantyUntil&&dayNum(d.warrantyUntil)>=dayNum(today())&&dayNum(d.warrantyUntil)-dayNum(today())<=60).sort((a,b)=>a.warrantyUntil.localeCompare(b.warrantyUntil));
+  if(warr.length){h+='<div class="sec"><h2>Warranty ending soon <small>next 60 days</small></h2><div class="list">'+warr.map(d=>devRow(d,'<div class="m">Warranty ends '+fmt(d.warrantyUntil)+(d.vendor?' · '+esc(d.vendor):'')+'. Use it before it runs out.</div>')).join('')+'</div></div>';}
   if(rep.length){h+='<div class="sec"><h2>Repeat faults <small>last 6 months</small></h2><div class="list">'+rep.map(x=>devRow(x.d,'<div class="m">'+x.n+' faults. Consider replacing or a full service.</div>')).join('')+'</div></div>';}
   return h;
 }
@@ -392,19 +432,19 @@ function viewDevice(id){
   const s=state(d),of=openFault(d),di=dueIn(d);
   let h='<div class="top"><a class="back" href="#/devices">‹ Devices</a></div>';
   h+='<div class="hero" style="--c:'+s.c+'"><div class="band"><span>'+s.label+'</span><span>'+esc(d.id)+'</span></div><div class="body"><h1 style="font-size:24px">'+esc(d.name)+'</h1><div class="id">'+esc(d.ward)+(d.category?' · '+esc(d.category):'')+(d.critical?' · Critical equipment':'')+'</div>';
-  h+='<dl class="kv"><dt>Make and model</dt><dd>'+esc(d.model||'-')+'</dd><dt>Serial number</dt><dd>'+esc(d.serial||'-')+'</dd><dt>Service schedule</dt><dd>'+intervalLabel(d.ppmDays)+'</dd><dt>Last serviced</dt><dd>'+(d.ppmDays||d.baseline?fmt(lastService(d)):'-')+'</dd>'+(di!==null?'<dt>Next service</dt><dd>'+fmt(new Date((dayNum(lastService(d))+Number(d.ppmDays))*864e5).toISOString().slice(0,10))+(di<0?' ('+(-di)+' days overdue)':'')+'</dd>':'')+'</dl></div></div>';
+  h+='<dl class="kv"><dt>Make and model</dt><dd>'+esc(d.model||'-')+'</dd><dt>Serial number</dt><dd>'+esc(d.serial||'-')+'</dd><dt>Service schedule</dt><dd>'+intervalLabel(d.ppmDays)+'</dd><dt>Last serviced</dt><dd>'+(d.ppmDays||d.baseline?fmt(lastService(d)):'-')+'</dd>'+(di!==null?'<dt>Next service</dt><dd>'+fmt(new Date((dayNum(lastService(d))+Number(d.ppmDays))*864e5).toISOString().slice(0,10))+(di<0?' ('+(-di)+' days overdue)':'')+'</dd>':'')+(d.warrantyUntil?'<dt>Warranty ends</dt><dd>'+fmt(d.warrantyUntil)+(dayNum(d.warrantyUntil)<dayNum(today())?' (expired)':'')+'</dd>':'')+(d.vendor?'<dt>Vendor</dt><dd>'+esc(d.vendor)+'</dd>':'')+(d.vendorPhone?'<dt>Vendor phone</dt><dd><a href="tel:'+esc(d.vendorPhone)+'" style="color:var(--brand);font-weight:600">'+esc(d.vendorPhone)+'</a></dd>':'')+'</dl></div></div>';
   if(of){
-    h+='<div class="fault"><div style="display:flex;justify-content:space-between;gap:8px"><h3>Open fault</h3><span class="pill bad">'+(of.priority==='Urgent'?'Urgent · ':'')+esc(of.stage)+'</span></div><p>'+esc(of.desc)+'</p><p class="small muted">Reported '+fmt(of.reportedAt)+(of.reporter?' by '+esc(of.reporter):'')+' · down '+daysOpen(of)+' day'+(daysOpen(of)===1?'':'s')+'</p><div class="btnrow"><button class="btn" data-act="stage" data-id="'+of.id+'">Update status</button><button class="btn primary" data-act="resolve" data-id="'+of.id+'">Mark as fixed</button></div></div>';
+    h+='<div class="fault"><div style="display:flex;justify-content:space-between;gap:8px"><h3>Open fault</h3><span class="pill bad">'+(of.priority==='Urgent'?'Urgent · ':'')+esc(of.stage)+'</span></div><p>'+esc(of.desc)+'</p><p class="small muted">Reported '+fmt(of.reportedAt)+(of.reporter?' by '+esc(of.reporter):'')+' · down '+daysOpen(of)+' day'+(daysOpen(of)===1?'':'s')+'</p>'+(of.photoPath?'<p><button class="btn" data-act="photo" data-path="'+esc(of.photoPath)+'">View photo</button></p>':'')+'<div class="btnrow"><button class="btn" data-act="stage" data-id="'+of.id+'">Update status</button><button class="btn primary" data-act="resolve" data-id="'+of.id+'">Mark as fixed</button></div></div>';
   }
   if(!d.retired){
     h+='<div class="actions">'+(of?'':'<button class="btn primary" data-act="report" data-id="'+d.id+'">Report fault</button>')+'<button class="btn" data-act="service" data-id="'+d.id+'">Log service</button><a class="btn" href="#/label/'+esc(d.id)+'">QR label</a>'+(of?'<button class="btn" data-act="report" data-id="'+d.id+'">Report another fault</button>':'')+'</div>';
   } else h+='<div class="actions"><a class="btn wide" href="#/label/'+esc(d.id)+'">QR label</a></div>';
   const items=[];
-  S.faults.filter(f=>f.deviceId===d.id).forEach(f=>{items.push({date:f.reportedAt,c:'var(--bad)',t:'Fault: '+f.desc,m:(f.reporter?'Reported by '+f.reporter+'. ':'')+(f.resolvedAt?'Fixed '+fmt(f.resolvedAt)+' after '+daysOpen(f)+' day'+(daysOpen(f)===1?'':'s')+'. '+f.action+(f.cost!==''&&f.cost!=null?' Cost '+naira(f.cost)+'.':''):'Still open.')});});
+  S.faults.filter(f=>f.deviceId===d.id).forEach(f=>{items.push({date:f.reportedAt,c:'var(--bad)',t:'Fault: '+f.desc,m:(f.reporter?'Reported by '+f.reporter+'. ':'')+(f.resolvedAt?'Fixed '+fmt(f.resolvedAt)+' after '+daysOpen(f)+' day'+(daysOpen(f)===1?'':'s')+'. '+f.action+(f.cost!==''&&f.cost!=null?' Cost '+naira(f.cost)+'.':''):'Still open.'),photo:f.photoPath});});
   S.services.filter(x=>x.deviceId===d.id).forEach(x=>{items.push({date:x.date,c:'var(--brand)',t:(x.type==='PPM'?'Planned maintenance':x.type),m:[x.notes,x.by?'By '+x.by:''].filter(Boolean).join('. ')});});
   items.sort((a,b)=>b.date.localeCompare(a.date));
   h+='<div class="sec"><h2>History</h2>';
-  h+=items.length?'<ul class="tl">'+items.map(i=>'<li style="--c:'+i.c+'"><div class="when">'+fmt(i.date)+'</div><div><b>'+esc(i.t)+'</b></div>'+(i.m?'<div class="small muted">'+esc(i.m)+'</div>':'')+'</li>').join('')+'</ul>':'<div class="empty">No history yet.</div>';
+  h+=items.length?'<ul class="tl">'+items.map(i=>'<li style="--c:'+i.c+'"><div class="when">'+fmt(i.date)+'</div><div><b>'+esc(i.t)+'</b></div>'+(i.m?'<div class="small muted">'+esc(i.m)+'</div>':'')+(i.photo?'<div><button class="btn" style="min-height:36px;padding:6px 12px;margin-top:6px" data-act="photo" data-path="'+esc(i.photo)+'">View photo</button></div>':'')+'</li>').join('')+'</ul>':'<div class="empty">No history yet.</div>';
   h+='</div>';
   h+='<div class="actions" style="margin-top:8px"><button class="btn" data-act="edit" data-id="'+d.id+'">Edit details</button><button class="btn" data-act="retire" data-id="'+d.id+'">'+(d.retired?'Bring back into use':'Retire device')+'</button><button class="btn danger wide" data-act="delete" data-id="'+d.id+'">Delete device and its history</button></div>';
   return h;
@@ -467,9 +507,96 @@ function viewMore(){
   return '<h1>Account</h1><p class="sub">Signed in as '+esc(session&&session.user.email)+'</p>'+
   '<div class="list">'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Monthly report</div><div class="m">Uptime, faults, costs and overdue servicing, ready to print for management.</div><div class="btnrow"><a class="btn primary" href="#/report">Open monthly report</a></div></div>'+
+  '<div class="tag" style="--c:var(--brand)"><div class="n">Import devices from Excel</div><div class="m">Add many devices at once from a spreadsheet instead of typing each one.</div><div class="btnrow"><a class="btn" href="#/import">Import devices</a></div></div>'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Fault log for reports</div><div class="m">Spreadsheet of every fault with days down and cost.</div><div class="btnrow"><button class="btn" data-act="exportCsv">Download fault log (CSV)</button></div></div>'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Full backup</div><div class="m">All devices, faults and services as one file. Keep a copy somewhere safe each month.</div><div class="btnrow"><button class="btn" data-act="exportJson">Download backup</button></div></div>'+
   '<div class="tag" style="--c:var(--retired)"><div class="n">Data</div><div class="m">'+S.devices.length+' devices · '+S.faults.length+' faults · '+S.services.length+' services</div><div class="btnrow"><button class="btn" data-act="signout">Sign out</button></div></div></div>';
+}
+
+/* ---------- import devices ---------- */
+let importRows=[],importSkipped=[];
+const HMAP={name:['name','device','devicename','equipment','item'],category:['type','category','devicetype'],model:['model','makeandmodel','makemodel','make'],serial:['serial','serialnumber','serialno','sn'],ward:['ward','location','department','unit'],interval:['serviceinterval','serviceintervaldays','intervaldays','interval','servicedays','ppm','ppmdays','serviceschedule'],critical:['critical','criticalyesno','criticalyn','criticalequipment'],last:['lastserviced','lastserviceddate','lastservice','lastservicedate','lastppm'],warranty:['warranty','warrantyuntil','warrantyends','warrantyenddate','warrantyexpiry','warrantyend'],vendor:['vendor','supplier'],vendorPhone:['vendorphone','supplierphone','phone']};
+function normH(h){return String(h).toLowerCase().replace(/[^a-z]/g,'');}
+function pickCol(row,key){for(const k of Object.keys(row)){if(HMAP[key].indexOf(normH(k))>=0)return row[k];}return '';}
+function toDateStr(v){
+  if(v===''||v==null)return null;
+  if(v instanceof Date&&!isNaN(v)){const d=new Date(v.getTime()+43200000);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
+  if(typeof v==='number'&&v>20000){const d=new Date(Math.round((v-25569)*864e5));return d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate());}
+  const t=String(v).trim();let m;
+  if((m=t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)))return m[1]+'-'+pad(+m[2])+'-'+pad(+m[3]);
+  if((m=t.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/))){let y=+m[3];if(y<100)y+=2000;return y+'-'+pad(+m[2])+'-'+pad(+m[1]);}
+  return null;
+}
+function toInterval(v){
+  if(v===''||v==null)return 0;
+  if(typeof v==='number')return Math.max(0,Math.round(v));
+  const t=String(v).toLowerCase().trim();
+  if(/^\d+$/.test(t))return +t;
+  if(/month(ly)?$/.test(t)&&!/\d/.test(t))return 30;
+  if(/quarter|3 ?month/.test(t))return 90;
+  if(/6 ?month|half|bi-?annual|semi/.test(t))return 180;
+  if(/year|annual|12 ?month/.test(t))return 365;
+  if(/^1 ?month/.test(t))return 30;
+  return 0;
+}
+function parseSheet(rows){
+  importRows=[];importSkipped=[];
+  rows.forEach((r,i)=>{
+    const name=String(pickCol(r,'name')).trim(),ward=String(pickCol(r,'ward')).trim();
+    const n=i+2;
+    if(!name&&!ward&&!Object.values(r).some(v=>String(v).trim()))return;
+    if(!name){importSkipped.push('Row '+n+': no device name');return;}
+    if(!ward){importSkipped.push('Row '+n+': no ward or location for '+name);return;}
+    const w=pickCol(r,'warranty'),l=pickCol(r,'last');
+    importRows.push({name:name.slice(0,120),category:String(pickCol(r,'category')).trim()||null,model:String(pickCol(r,'model')).trim()||null,serial:String(pickCol(r,'serial')).trim()||null,ward:ward,ppm_days:toInterval(pickCol(r,'interval')),critical:/^(y|yes|true|1|critical)$/i.test(String(pickCol(r,'critical')).trim()),baseline:toDateStr(l),warranty_until:toDateStr(w),vendor:String(pickCol(r,'vendor')).trim()||null,vendor_phone:String(pickCol(r,'vendorPhone')).trim()||null});
+  });
+}
+function viewImport(){
+  let h='<div class="top"><a class="back" href="#/more">‹ Account</a></div><h1>Import devices</h1><p class="sub">Add many devices from an Excel or CSV file.</p>';
+  h+='<div class="note">1. Tap <b>Download template</b> and fill it in (or use your own list).<br>2. Keep one device per row. <b>Name</b> and <b>Ward</b> are required.<br>3. Choose the file below, check the preview, then tap Import.</div>';
+  h+='<div class="btnrow"><button class="btn" data-act="template">Download template</button><button class="btn primary" data-act="pickImport">Choose file</button></div><input type="file" id="impFile" accept=".xlsx,.xls,.csv" hidden>';
+  h+='<div id="impOut"></div>';
+  return h;
+}
+function renderImportPreview(){
+  const out=$('#impOut');if(!out)return;
+  let h='<div class="sec"><h2>Preview <small>'+importRows.length+' ready</small></h2>';
+  if(importRows.length){
+    h+='<div class="tbl"><table><tr><th>Name</th><th>Ward</th><th>Service</th><th>Critical</th></tr>'+importRows.slice(0,8).map(r=>'<tr><td>'+esc(r.name)+'</td><td>'+esc(r.ward)+'</td><td>'+(r.ppm_days?intervalLabel(r.ppm_days):'-')+'</td><td>'+(r.critical?'Yes':'')+'</td></tr>').join('')+'</table></div>';
+    if(importRows.length>8)h+='<p class="small muted">and '+(importRows.length-8)+' more</p>';
+    h+='<div class="btnrow"><button class="btn primary" data-act="doImport">Import '+importRows.length+' device'+(importRows.length===1?'':'s')+'</button></div>';
+  }else h+='<div class="empty">No usable rows found. Check that your columns include Name and Ward.</div>';
+  if(importSkipped.length)h+='<div class="note" style="margin-top:12px"><b>'+importSkipped.length+' row'+(importSkipped.length===1?'':'s')+' skipped</b><br>'+importSkipped.slice(0,8).map(esc).join('<br>')+(importSkipped.length>8?'<br>and more':'')+'</div>';
+  h+='</div>';out.innerHTML=h;
+}
+function readImportFile(file){
+  if(typeof XLSX==='undefined'){toast('Import tool did not load. Check your connection and reload.');return;}
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{
+      const wb=XLSX.read(new Uint8Array(rd.result),{type:'array',cellDates:true});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      parseSheet(XLSX.utils.sheet_to_json(ws,{defval:'',raw:true}));
+      renderImportPreview();
+    }catch(e){toast('Could not read that file');}
+  };
+  rd.readAsArrayBuffer(file);
+}
+async function doImport(){
+  if(!importRows.length)return;
+  const btn=document.querySelector('[data-act="doImport"]');if(btn)btn.disabled=true;
+  let done=0;
+  for(let i=0;i<importRows.length;i+=100){
+    const r=await sb.from('devices').insert(importRows.slice(i,i+100));
+    if(r.error){toast('Import stopped: '+r.error.message);await loadAll();render();return;}
+    done+=Math.min(100,importRows.length-i);
+  }
+  importRows=[];importSkipped=[];
+  await loadAll();toast(done+' devices imported');location.hash='#/devices';render();
+}
+function downloadTemplate(){
+  const rows=[['Name','Type','Make and model','Serial number','Ward','Service interval (days)','Critical (yes/no)','Last serviced','Warranty ends','Vendor','Vendor phone'],['Patient monitor','Patient monitor','Mindray BeneView T5','SN12345','ICU','180','yes','2026-06-15','2027-03-01','MedSupply Ltd','08012345678'],['Suction machine','Suction machine','','','Theatre','90','yes','','','','']];
+  saveFile('device-import-template.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'),'text/csv');
 }
 
 /* ---------- monthly report ---------- */
@@ -513,6 +640,24 @@ function viewLogin(){
 }
 
 /* ---------- public report page ---------- */
+const QKEY='eq-report-queue';
+function getQueue(){try{return JSON.parse(localStorage.getItem(QKEY)||'[]');}catch(e){return [];}}
+function setQueue(q){try{localStorage.setItem(QKEY,JSON.stringify(q));}catch(e){}}
+function queueReport(p){const q=getQueue();q.push(p);setQueue(q);}
+let flushing=false;
+async function flushQueue(){
+  if(flushing)return;const q=getQueue();if(!q.length)return;flushing=true;
+  try{
+    const left=[];let sent=0;
+    for(const p of q){
+      const r=await sb.rpc('report_fault',p);
+      if(r.error){left.push(p);}else sent++;
+    }
+    setQueue(left);
+    if(sent)toast(sent+' saved report'+(sent===1?'':'s')+' sent');
+  }finally{flushing=false;}
+}
+window.addEventListener('online',flushQueue);
 async function renderPublic(id){
   const app=$('#app');
   app.innerHTML='<h1>Report a fault</h1><p class="sub">Loading device...</p>';
@@ -526,15 +671,24 @@ async function renderPublic(id){
   '<form id="pubForm"><label class="f">What is wrong?<textarea name="desc" required maxlength="1000" placeholder="e.g. Screen blank, alarm sounding, no power"></textarea></label>'+
   '<label class="f">Priority<select name="priority"><option value="Normal">Normal</option><option value="Urgent">Urgent - patient care affected</option></select></label>'+
   '<label class="f">Your name and ward<input name="reporter" maxlength="80" placeholder="e.g. Nurse Ada, ICU"></label>'+
+  '<label class="f">Photo (optional)<input name="photo" type="file" accept="image/*"></label>'+
   '<div class="btnrow"><button class="btn primary">Send report</button></div></form>')+
   (session?'<p class="sub" style="margin-top:18px"><a href="#/d/'+esc(d.id)+'" style="color:var(--brand);font-weight:600">Open full device record</a></p>':'');
   const pf=$('#pubForm');if(!pf)return;
   pf.addEventListener('submit',async e=>{
     e.preventDefault();const f=e.target,btn=f.querySelector('.primary');btn.disabled=true;
     const fd=new FormData(f);
-    const res=await sb.rpc('report_fault',{p_id:d.id,p_desc:String(fd.get('desc')||''),p_priority:String(fd.get('priority')||'Normal'),p_reporter:String(fd.get('reporter')||'')});
+    const payload={p_id:d.id,p_desc:String(fd.get('desc')||''),p_priority:String(fd.get('priority')||'Normal'),p_reporter:String(fd.get('reporter')||'')};
+    const ph=fd.get('photo');
+    if(ph&&ph.size&&navigator.onLine!==false){const pp=await uploadPhoto(ph);if(pp)payload.p_photo=pp;else toast('Photo could not be uploaded. Sending without it.');}
+    const res=await sb.rpc('report_fault',payload);
     btn.disabled=false;
-    if(res.error){toast('Could not send. Check your connection and try again.');return;}
+    if(res.error){
+      if(!payload.p_desc.trim()){toast('Describe what is wrong first');return;}
+      delete payload.p_photo;queueReport(payload);
+      $('#app').innerHTML='<h1>Saved on this phone</h1><div class="empty" style="margin-top:14px">No network right now. Your report is saved and will be sent automatically when you are back online. Keep this page open, or open it again later. Photos are not saved while offline.</div>';
+      return;
+    }
     const msgs={ok:['Fault reported','The biomedical engineering unit will see it on their dashboard.'],duplicate:['Already reported','This device already has a fault waiting for repair. No need to report it again.'],invalid:['Description needed','Describe what is wrong and send again.'],not_found:['Device not found','Check the label and try again.']};
     const m=msgs[res.data]||['Something went wrong','Please try again.'];
     if(res.data==='invalid'||!msgs[res.data]){toast(m[1]);return;}
@@ -576,11 +730,13 @@ function render(){
     case 'scan':nav='scan';h=viewScan();break;
     case 'more':nav='more';h=viewMore();break;
     case 'report':nav='more';h=viewReport();break;
+    case 'import':nav='more';h=viewImport();break;
     default:h=viewToday();
   }
   $('#app').innerHTML=h;
   document.querySelectorAll('nav.bar a').forEach(a=>{if(a.dataset.nav===nav)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});
   if(p[0]==='scan'){startScan();const sh=$('#shot');if(sh)sh.addEventListener('change',e=>{const f=e.target.files[0];if(f)decodePhoto(f);});}
+  const imf=$('#impFile');if(imf)imf.addEventListener('change',e=>{const f=e.target.files[0];if(f)readImportFile(f);});
   const rm=$('#rm');if(rm)rm.addEventListener('change',e=>{if(e.target.value){reportMonth=e.target.value;render();}});
   const qEl=$('#q');if(qEl)qEl.addEventListener('input',e=>{devQuery=e.target.value;const pos=e.target.selectionStart;render();const n=$('#q');if(n){n.focus();n.setSelectionRange(pos,pos);}});
 }
@@ -617,6 +773,10 @@ document.addEventListener('click',async e=>{
       if(!act.length){toast('Add a device first');break;}
       sheet('Which device?','<label class="f">Device<select name="id">'+act.map(d=>'<option value="'+esc(d.id)+'">'+esc(d.id)+' · '+esc(d.name)+' · '+esc(d.ward)+'</option>').join('')+'</select></label>',fd=>{closeSheet();faultForm(dev(fd.id));},'Next');break;}
     case 'shot':$('#shot').click();break;
+    case 'photo':showPhoto(t.dataset.path);break;
+    case 'template':downloadTemplate();break;
+    case 'pickImport':$('#impFile').click();break;
+    case 'doImport':doImport();break;
     case 'manualGo':{const pid=parseId(($('#manual').value||'').trim());if(pid)location.hash='#/d/'+pid;else toast('Enter an ID like EQ-0001');break;}
     case 'exportJson':saveFile('equipment-backup-'+today()+'.json',JSON.stringify(S,null,2),'application/json');break;
     case 'exportCsv':exportCsv();break;
@@ -636,14 +796,16 @@ sb.auth.onAuthStateChange(async (ev,s)=>{
   if(session&&!was){await loadAll();render();}
   else if(!session&&was){S={devices:[],faults:[],services:[]};loaded=false;render();}
 });
+if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 (async function init(){
   const r=await sb.auth.getSession();session=r.data&&r.data.session;
   if(session)await loadAll();
   render();
+  flushQueue();
 })();
 function autoRefresh(){
   if(!session||document.hidden||!$('#sheet').hidden)return;
-  const h=location.hash;if(h.indexOf('#/r/')===0||h.indexOf('#/scan')===0)return;
+  const h=location.hash;if(h.indexOf('#/r/')===0||h.indexOf('#/scan')===0||h.indexOf('#/import')===0)return;
   const ae=document.activeElement;if(ae&&/INPUT|TEXTAREA|SELECT/.test(ae.tagName))return;
   const before=new Set(S.faults.filter(f=>!f.resolvedAt).map(f=>f.id));
   loadAll().then(ok=>{
