@@ -238,7 +238,7 @@ async function loadAll(){
       sb.from('services').select('*').order('service_date',{ascending:false}).limit(5000)
     ]);
     if(d.error||f.error||s.error){toast('Could not load data. Check your connection.');return false;}
-    S.devices=d.data.map(x=>({id:x.id,name:x.name,category:x.category||'',model:x.model||'',serial:x.serial||'',ward:x.ward,ppmDays:x.ppm_days||0,baseline:x.baseline||'',added:x.added,retired:x.retired}));
+    S.devices=d.data.map(x=>({id:x.id,name:x.name,category:x.category||'',model:x.model||'',serial:x.serial||'',ward:x.ward,ppmDays:x.ppm_days||0,baseline:x.baseline||'',added:x.added,retired:x.retired,critical:!!x.critical}));
     S.faults=f.data.map(x=>({id:x.id,deviceId:x.device_id,desc:x.descr,priority:x.priority,reporter:x.reporter||'',reportedAt:x.reported_at,stage:x.stage,resolvedAt:x.resolved_at,action:x.action||'',cost:x.cost==null?'':x.cost}));
     S.services=s.data.map(x=>({id:x.id,deviceId:x.device_id,type:x.type,date:x.service_date,notes:x.notes||'',by:x.by_name||''}));
     const sig=JSON.stringify([S.devices,S.faults,S.services]);dataChanged=sig!==lastSig;lastSig=sig;
@@ -287,10 +287,11 @@ function deviceForm(d){
     field('Type','category',{list:'cats',value:d.category})+
     '<div class="two">'+field('Make and model','model',{value:d.model})+field('Serial number','serial',{value:d.serial})+'</div>'+
     field('Ward or location','ward',{required:true,list:'wards',value:d.ward})+
+    '<label class="f" style="display:flex;gap:10px;align-items:center"><input type="checkbox" name="critical" value="1" style="width:auto;margin:0;min-height:0"'+(d.critical?' checked':'')+'> Critical equipment (life support or emergency use)</label>'+
     '<div class="two">'+field('Service schedule','ppmDays',{value:d.ppmDays||0,options:[[0,'No schedule'],[30,'Every month'],[90,'Every 3 months'],[180,'Every 6 months'],[365,'Every year']]})+
     field('Last serviced','baseline',{type:'date',value:d.baseline||''})+'</div>',
     async fd=>{
-      const row={name:fd.name,category:fd.category||null,model:fd.model||null,serial:fd.serial||null,ward:fd.ward,ppm_days:Number(fd.ppmDays),baseline:fd.baseline||null};
+      const row={name:fd.name,category:fd.category||null,model:fd.model||null,serial:fd.serial||null,ward:fd.ward,ppm_days:Number(fd.ppmDays),baseline:fd.baseline||null,critical:fd.critical==='1'};
       if(e){if(await run(sb.from('devices').update(row).eq('id',d.id),'Device updated'))closeSheet();}
       else{
         const r=await sb.from('devices').insert(row).select('id').single();
@@ -340,7 +341,7 @@ function devRow(d,extra){
   let line='';
   if(of)line='<div class="d">'+esc(of.desc)+'</div>';
   else{const di=dueIn(d);if(di!==null)line='<div class="d muted">'+(di<0?'Service overdue by '+(-di)+' day'+(di===-1?'':'s'):di===0?'Service due today':'Next service in '+di+' day'+(di===1?'':'s'))+'</div>';}
-  return '<a class="tag" style="--c:'+s.c+'" href="#/d/'+esc(d.id)+'"><div class="t"><div><div class="n">'+esc(d.name)+'</div><div class="m">'+esc(d.id)+' · '+esc(d.ward)+'</div></div><span class="pill '+(s.k==='down'?'bad':s.k==='due'?'warn':s.k==='ok'?'ok':'off')+'">'+s.label+'</span></div>'+line+(extra||'')+'</a>';
+  return '<a class="tag" style="--c:'+s.c+'" href="#/d/'+esc(d.id)+'"><div class="t"><div><div class="n">'+esc(d.name)+(d.critical?' <span class="pill bad">Critical</span>':'')+'</div><div class="m">'+esc(d.id)+' · '+esc(d.ward)+'</div></div><span class="pill '+(s.k==='down'?'bad':s.k==='due'?'warn':s.k==='ok'?'ok':'off')+'">'+s.label+'</span></div>'+line+(extra||'')+'</a>';
 }
 
 function viewToday(){
@@ -350,7 +351,7 @@ function viewToday(){
   }
   const down=act.filter(d=>openFault(d)),due=act.filter(d=>!openFault(d)&&dueIn(d)!==null&&dueIn(d)<0),ok=act.length-down.length-due.length;
   const up=uptime30();
-  const faults=S.faults.filter(f=>!f.resolvedAt&&dev(f.deviceId)&&!dev(f.deviceId).retired).sort((a,b)=>(a.priority==='Urgent'?0:1)-(b.priority==='Urgent'?0:1)||dayNum(a.reportedAt)-dayNum(b.reportedAt));
+  const faults=S.faults.filter(f=>!f.resolvedAt&&dev(f.deviceId)&&!dev(f.deviceId).retired).sort((a,b)=>(dev(a.deviceId).critical?0:1)-(dev(b.deviceId).critical?0:1)||(a.priority==='Urgent'?0:1)-(b.priority==='Urgent'?0:1)||dayNum(a.reportedAt)-dayNum(b.reportedAt));
   const soon=act.filter(d=>{const x=dueIn(d);return x!==null&&x>=0&&x<=14;}).sort((a,b)=>dueIn(a)-dueIn(b));
   const overdueList=act.filter(d=>dueIn(d)!==null&&dueIn(d)<0).sort((a,b)=>dueIn(a)-dueIn(b));
   const cutoff=dayNum(today())-180;
@@ -359,7 +360,7 @@ function viewToday(){
   h+='<div class="strip"><a href="#/devices?f=down" style="--c:var(--bad)"><b>'+down.length+'</b><span>Down</span></a><a href="#/devices?f=due" style="--c:var(--warn)"><b>'+due.length+'</b><span>Service overdue</span></a><a href="#/devices?f=ok" style="--c:var(--ok)"><b>'+ok+'</b><span>Working</span></a></div>';
   h+='<div class="actions"><button class="btn primary wide" data-act="pickReport">Report a fault</button></div>';
   h+='<div class="sec"><h2>Open faults <small>'+faults.length+'</small></h2>';
-  h+=faults.length?'<div class="list">'+faults.map(f=>{const d=dev(f.deviceId);return '<a class="tag" style="--c:var(--bad)" href="#/d/'+esc(d.id)+'"><div class="t"><div><div class="n">'+esc(d.name)+'</div><div class="m">'+esc(d.id)+' · '+esc(d.ward)+'</div></div>'+(f.priority==='Urgent'?'<span class="pill bad">Urgent</span>':'<span class="pill">'+esc(f.stage)+'</span>')+'</div><div class="d">'+esc(f.desc)+'</div><div class="m">Down '+daysOpen(f)+' day'+(daysOpen(f)===1?'':'s')+' · '+esc(f.stage)+(f.reporter?' · from '+esc(f.reporter):'')+'</div></a>';}).join('')+'</div>':'<div class="empty">No open faults. Everything reported has been fixed.</div>';
+  h+=faults.length?'<div class="list">'+faults.map(f=>{const d=dev(f.deviceId);return '<a class="tag" style="--c:var(--bad)" href="#/d/'+esc(d.id)+'"><div class="t"><div><div class="n">'+esc(d.name)+(d.critical?' <span class="pill bad">Critical</span>':'')+'</div><div class="m">'+esc(d.id)+' · '+esc(d.ward)+'</div></div>'+(f.priority==='Urgent'?'<span class="pill bad">Urgent</span>':'<span class="pill">'+esc(f.stage)+'</span>')+'</div><div class="d">'+esc(f.desc)+'</div><div class="m">Down '+daysOpen(f)+' day'+(daysOpen(f)===1?'':'s')+' · '+esc(f.stage)+(f.reporter?' · from '+esc(f.reporter):'')+'</div></a>';}).join('')+'</div>':'<div class="empty">No open faults. Everything reported has been fixed.</div>';
   h+='</div>';
   const mlist=overdueList.concat(soon);
   h+='<div class="sec"><h2>Maintenance due <small>next 14 days</small></h2>';
@@ -390,7 +391,7 @@ function viewDevice(id){
   if(!d)return '<div class="top"><a class="back" href="#/devices">‹ Devices</a></div><div class="empty">No device with ID <b>'+esc(id)+'</b>. Check the ID, or add the device first.</div>';
   const s=state(d),of=openFault(d),di=dueIn(d);
   let h='<div class="top"><a class="back" href="#/devices">‹ Devices</a></div>';
-  h+='<div class="hero" style="--c:'+s.c+'"><div class="band"><span>'+s.label+'</span><span>'+esc(d.id)+'</span></div><div class="body"><h1 style="font-size:24px">'+esc(d.name)+'</h1><div class="id">'+esc(d.ward)+(d.category?' · '+esc(d.category):'')+'</div>';
+  h+='<div class="hero" style="--c:'+s.c+'"><div class="band"><span>'+s.label+'</span><span>'+esc(d.id)+'</span></div><div class="body"><h1 style="font-size:24px">'+esc(d.name)+'</h1><div class="id">'+esc(d.ward)+(d.category?' · '+esc(d.category):'')+(d.critical?' · Critical equipment':'')+'</div>';
   h+='<dl class="kv"><dt>Make and model</dt><dd>'+esc(d.model||'-')+'</dd><dt>Serial number</dt><dd>'+esc(d.serial||'-')+'</dd><dt>Service schedule</dt><dd>'+intervalLabel(d.ppmDays)+'</dd><dt>Last serviced</dt><dd>'+(d.ppmDays||d.baseline?fmt(lastService(d)):'-')+'</dd>'+(di!==null?'<dt>Next service</dt><dd>'+fmt(new Date((dayNum(lastService(d))+Number(d.ppmDays))*864e5).toISOString().slice(0,10))+(di<0?' ('+(-di)+' days overdue)':'')+'</dd>':'')+'</dl></div></div>';
   if(of){
     h+='<div class="fault"><div style="display:flex;justify-content:space-between;gap:8px"><h3>Open fault</h3><span class="pill bad">'+(of.priority==='Urgent'?'Urgent · ':'')+esc(of.stage)+'</span></div><p>'+esc(of.desc)+'</p><p class="small muted">Reported '+fmt(of.reportedAt)+(of.reporter?' by '+esc(of.reporter):'')+' · down '+daysOpen(of)+' day'+(daysOpen(of)===1?'':'s')+'</p><div class="btnrow"><button class="btn" data-act="stage" data-id="'+of.id+'">Update status</button><button class="btn primary" data-act="resolve" data-id="'+of.id+'">Mark as fixed</button></div></div>';
@@ -519,13 +520,16 @@ async function renderPublic(id){
   if(r.error){app.innerHTML='<h1>Report a fault</h1><div class="empty">Could not reach the server. Check your connection and scan again.</div>';return;}
   const d=r.data&&r.data[0];
   if(!d){app.innerHTML='<h1>Report a fault</h1><div class="empty">This device was not found, or it has been retired. Check the label and try again.</div>';return;}
-  app.innerHTML='<h1>Report a fault</h1><div class="hero" style="--c:var(--brand);margin-top:12px"><div class="band"><span>'+esc(d.id)+'</span></div><div class="body"><h3 style="font-size:20px">'+esc(d.name)+'</h3><div class="id">'+esc(d.ward)+'</div></div></div>'+
+  const isOpen=!!d.fault_stage;
+  app.innerHTML='<h1>Report a fault</h1><div class="hero" style="--c:'+(isOpen?'var(--bad)':'var(--ok)')+';margin-top:12px"><div class="band"><span>'+(isOpen?'Fault reported':'Working')+'</span><span>'+esc(d.id)+'</span></div><div class="body"><h3 style="font-size:20px">'+esc(d.name)+'</h3><div class="id">'+esc(d.ward)+(d.critical?' · Critical equipment':'')+'</div></div></div>'+
+  (isOpen?'<div class="fault"><h3>Already being handled</h3><p>A fault on this device was reported on '+fmt(d.fault_since)+'. Current status: '+esc(d.fault_stage)+'. No need to report it again.</p></div>':
   '<form id="pubForm"><label class="f">What is wrong?<textarea name="desc" required maxlength="1000" placeholder="e.g. Screen blank, alarm sounding, no power"></textarea></label>'+
   '<label class="f">Priority<select name="priority"><option value="Normal">Normal</option><option value="Urgent">Urgent - patient care affected</option></select></label>'+
   '<label class="f">Your name and ward<input name="reporter" maxlength="80" placeholder="e.g. Nurse Ada, ICU"></label>'+
-  '<div class="btnrow"><button class="btn primary">Send report</button></div></form>'+
+  '<div class="btnrow"><button class="btn primary">Send report</button></div></form>')+
   (session?'<p class="sub" style="margin-top:18px"><a href="#/d/'+esc(d.id)+'" style="color:var(--brand);font-weight:600">Open full device record</a></p>':'');
-  $('#pubForm').addEventListener('submit',async e=>{
+  const pf=$('#pubForm');if(!pf)return;
+  pf.addEventListener('submit',async e=>{
     e.preventDefault();const f=e.target,btn=f.querySelector('.primary');btn.disabled=true;
     const fd=new FormData(f);
     const res=await sb.rpc('report_fault',{p_id:d.id,p_desc:String(fd.get('desc')||''),p_priority:String(fd.get('priority')||'Normal'),p_reporter:String(fd.get('reporter')||'')});
