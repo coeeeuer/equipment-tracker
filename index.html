@@ -11,7 +11,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+<script>window.jsQR||document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"><\/script>')</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{
@@ -207,7 +208,7 @@ let toastTimer;
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2800);}
 
 /* ---------- state ---------- */
-let S={devices:[],faults:[],services:[]};
+let S={devices:[],faults:[],services:[],audits:[]};
 let session=null,loaded=false,loading=false,lastSig='',dataChanged=false;
 const dev=id=>S.devices.find(d=>d.id===id);
 const openFault=d=>S.faults.find(f=>f.deviceId===d.id&&!f.resolvedAt);
@@ -228,6 +229,8 @@ function uptime30(){
     for(let i=a;i<=b;i++)set.add(i);});down+=set.size;});
   return Math.max(0,Math.round(100*(1-down/(act.length*30))));
 }
+const repairTotal=d=>S.faults.filter(f=>f.deviceId===d.id&&f.resolvedAt&&f.cost!==''&&f.cost!=null).reduce((n,f)=>n+Number(f.cost),0);
+function replaceFlag(d){const rc=Number(d.replacementCost);if(!rc||d.retired)return null;const t=repairTotal(d);return t>=0.5*rc?{total:t,pct:Math.round(100*t/rc),rc:rc}:null;}
 const daysOpen=f=>Math.max(0,(f.resolvedAt?dayNum(f.resolvedAt):dayNum(today()))-dayNum(f.reportedAt));
 const intervalLabel=n=>({30:'Every month',90:'Every 3 months',180:'Every 6 months',365:'Every year'}[n]||(n?'Every '+n+' days':'No schedule'));
 
@@ -236,16 +239,18 @@ async function loadAll(){
   if(!session||loading)return false;
   loading=true;
   try{
-    const [d,f,s]=await Promise.all([
+    const [d,f,s,au]=await Promise.all([
       sb.from('devices').select('*').order('id'),
       sb.from('faults').select('*').order('reported_at',{ascending:false}).limit(5000),
-      sb.from('services').select('*').order('service_date',{ascending:false}).limit(5000)
+      sb.from('services').select('*').order('service_date',{ascending:false}).limit(5000),
+      sb.from('audits').select('*').order('audit_date',{ascending:false}).limit(100)
     ]);
     if(d.error||f.error||s.error){toast('Could not load data. Check your connection.');return false;}
-    S.devices=d.data.map(x=>({id:x.id,name:x.name,category:x.category||'',model:x.model||'',serial:x.serial||'',ward:x.ward,ppmDays:x.ppm_days||0,baseline:x.baseline||'',added:x.added,retired:x.retired,critical:!!x.critical,warrantyUntil:x.warranty_until||'',vendor:x.vendor||'',vendorPhone:x.vendor_phone||''}));
-    S.faults=f.data.map(x=>({id:x.id,deviceId:x.device_id,desc:x.descr,priority:x.priority,reporter:x.reporter||'',reportedAt:x.reported_at,stage:x.stage,resolvedAt:x.resolved_at,action:x.action||'',cost:x.cost==null?'':x.cost,photoPath:x.photo_path||''}));
+    S.devices=d.data.map(x=>({id:x.id,name:x.name,category:x.category||'',model:x.model||'',serial:x.serial||'',ward:x.ward,ppmDays:x.ppm_days||0,baseline:x.baseline||'',added:x.added,retired:x.retired,critical:!!x.critical,warrantyUntil:x.warranty_until||'',vendor:x.vendor||'',vendorPhone:x.vendor_phone||'',replacementCost:x.replacement_cost==null?'':x.replacement_cost}));
+    S.faults=f.data.map(x=>({id:x.id,deviceId:x.device_id,desc:x.descr,priority:x.priority,reporter:x.reporter||'',reportedAt:x.reported_at,stage:x.stage,resolvedAt:x.resolved_at,action:x.action||'',cost:x.cost==null?'':x.cost,photoPath:x.photo_path||'',repairedBy:x.repaired_by||'',hours:x.hours_spent==null?'':x.hours_spent,parts:x.parts_used||''}));
     S.services=s.data.map(x=>({id:x.id,deviceId:x.device_id,type:x.type,date:x.service_date,notes:x.notes||'',by:x.by_name||''}));
-    const sig=JSON.stringify([S.devices,S.faults,S.services]);dataChanged=sig!==lastSig;lastSig=sig;
+    S.audits=au.error?[]:au.data.map(x=>({id:x.id,ward:x.ward,date:x.audit_date,expected:x.expected,found:x.found,missing:x.missing||[],unexpected:x.unexpected||[]}));
+    const sig=JSON.stringify([S.devices,S.faults,S.services,S.audits]);dataChanged=sig!==lastSig;lastSig=sig;
     loaded=true;
     return true;
   }catch(e){toast('Could not reach the server. Check your connection.');return false;}
@@ -279,7 +284,7 @@ function field(label,name,o){
   o=o||{};
   if(o.options){return '<label class="f">'+esc(label)+'<select name="'+name+'">'+o.options.map(x=>'<option value="'+esc(x[0])+'"'+(String(x[0])===String(o.value)?' selected':'')+'>'+esc(x[1])+'</option>').join('')+'</select></label>';}
   if(o.area){return '<label class="f">'+esc(label)+'<textarea name="'+name+'"'+(o.required?' required':'')+(o.placeholder?' placeholder="'+esc(o.placeholder)+'"':'')+' maxlength="1000">'+esc(o.value||'')+'</textarea></label>';}
-  return '<label class="f">'+esc(label)+'<input name="'+name+'" type="'+(o.type||'text')+'" value="'+esc(o.value||'')+'"'+(o.required?' required':'')+(o.list?' list="'+o.list+'"':'')+(o.placeholder?' placeholder="'+esc(o.placeholder)+'"':'')+(o.type==='number'?' inputmode="numeric" min="0"':'')+'></label>';
+  return '<label class="f">'+esc(label)+'<input name="'+name+'" type="'+(o.type||'text')+'" value="'+esc(o.value||'')+'"'+(o.required?' required':'')+(o.list?' list="'+o.list+'"':'')+(o.placeholder?' placeholder="'+esc(o.placeholder)+'"':'')+(o.type==='number'?' inputmode="decimal" step="any" min="0"':'')+'></label>';
 }
 const DL='<datalist id="cats"><option>Patient monitor<option>Ventilator<option>Suction machine<option>Infusion pump<option>Syringe pump<option>Incubator<option>Oxygen concentrator<option>Autoclave<option>ECG machine<option>Defibrillator<option>X-ray unit<option>Ultrasound<option>Lab analyser<option>Anaesthesia machine<option>Theatre light<option>BP apparatus<option>Nebuliser<option>Phototherapy unit</datalist><datalist id="wards"><option>Emergency<option>Theatre<option>ICU<option>Labour ward<option>Maternity<option>Paediatrics<option>Male ward<option>Female ward<option>Laboratory<option>Radiology<option>Outpatient<option>Store</datalist>';
 
@@ -295,9 +300,9 @@ function deviceForm(d){
     '<div class="two">'+field('Service schedule','ppmDays',{value:d.ppmDays||0,options:[[0,'No schedule'],[30,'Every month'],[90,'Every 3 months'],[180,'Every 6 months'],[365,'Every year']]})+
     field('Last serviced','baseline',{type:'date',value:d.baseline||''})+'</div>'+
     '<div class="two">'+field('Warranty ends','warrantyUntil',{type:'date',value:d.warrantyUntil||''})+field('Vendor or supplier','vendor',{value:d.vendor})+'</div>'+
-    field('Vendor phone','vendorPhone',{type:'tel',value:d.vendorPhone}),
+    '<div class="two">'+field('Vendor phone','vendorPhone',{type:'tel',value:d.vendorPhone})+field('Replacement cost (₦)','replacementCost',{type:'number',value:d.replacementCost})+'</div>',
     async fd=>{
-      const row={name:fd.name,category:fd.category||null,model:fd.model||null,serial:fd.serial||null,ward:fd.ward,ppm_days:Number(fd.ppmDays),baseline:fd.baseline||null,critical:fd.critical==='1',warranty_until:fd.warrantyUntil||null,vendor:fd.vendor||null,vendor_phone:fd.vendorPhone||null};
+      const row={name:fd.name,category:fd.category||null,model:fd.model||null,serial:fd.serial||null,ward:fd.ward,ppm_days:Number(fd.ppmDays),baseline:fd.baseline||null,critical:fd.critical==='1',warranty_until:fd.warrantyUntil||null,vendor:fd.vendor||null,vendor_phone:fd.vendorPhone||null,replacement_cost:fd.replacementCost===''||fd.replacementCost==null?null:Number(fd.replacementCost)};
       if(e){if(await run(sb.from('devices').update(row).eq('id',d.id),'Device updated'))closeSheet();}
       else{
         const r=await sb.from('devices').insert(row).select('id').single();
@@ -359,10 +364,12 @@ function stageForm(f){
 function resolveForm(f){
   sheet('Mark as fixed',
     '<div class="two">'+field('Date fixed','date',{type:'date',value:today(),required:true})+field('Repair cost (₦)','cost',{type:'number'})+'</div>'+
-    field('What was done?','action',{area:true,required:true,placeholder:'e.g. Replaced power supply board'}),
+    field('What was done?','action',{area:true,required:true,placeholder:'e.g. Replaced power supply board'})+
+    '<div class="two">'+field('Fixed by','repairedBy',{placeholder:'Name or company'})+field('Hours spent','hours',{type:'number'})+'</div>'+
+    field('Parts used','parts',{placeholder:'e.g. Power board, 2 fuses'}),
     async fd=>{
       if(dayNum(fd.date)<dayNum(f.reportedAt)){toast('Fixed date is before the report date');return;}
-      if(await run(sb.from('faults').update({resolved_at:fd.date,action:fd.action,cost:fd.cost===''?null:Number(fd.cost),stage:'Fixed'}).eq('id',f.id),'Marked as fixed'))closeSheet();
+      if(await run(sb.from('faults').update({resolved_at:fd.date,action:fd.action,cost:fd.cost===''?null:Number(fd.cost),repaired_by:fd.repairedBy||null,hours_spent:fd.hours===''?null:Number(fd.hours),parts_used:fd.parts||null,stage:'Fixed'}).eq('id',f.id),'Marked as fixed'))closeSheet();
     },'Mark as fixed');
 }
 
@@ -404,7 +411,9 @@ function viewToday(){
   h+='<div class="sec"><h2>Maintenance due <small>next 14 days</small></h2>';
   h+=mlist.length?'<div class="list">'+mlist.map(d=>devRow(d)).join('')+'</div>':'<div class="empty">Nothing overdue or due soon.</div>';
   h+='</div>';
+  const repl=act.filter(d=>replaceFlag(d));
   const warr=act.filter(d=>d.warrantyUntil&&dayNum(d.warrantyUntil)>=dayNum(today())&&dayNum(d.warrantyUntil)-dayNum(today())<=60).sort((a,b)=>a.warrantyUntil.localeCompare(b.warrantyUntil));
+  if(repl.length){h+='<div class="sec"><h2>Consider replacing</h2><div class="list">'+repl.map(d=>{const rf=replaceFlag(d);return devRow(d,'<div class="m">Repairs cost '+naira(rf.total)+', '+rf.pct+'% of the replacement price.</div>');}).join('')+'</div></div>';}
   if(warr.length){h+='<div class="sec"><h2>Warranty ending soon <small>next 60 days</small></h2><div class="list">'+warr.map(d=>devRow(d,'<div class="m">Warranty ends '+fmt(d.warrantyUntil)+(d.vendor?' · '+esc(d.vendor):'')+'. Use it before it runs out.</div>')).join('')+'</div></div>';}
   if(rep.length){h+='<div class="sec"><h2>Repeat faults <small>last 6 months</small></h2><div class="list">'+rep.map(x=>devRow(x.d,'<div class="m">'+x.n+' faults. Consider replacing or a full service.</div>')).join('')+'</div></div>';}
   return h;
@@ -432,7 +441,9 @@ function viewDevice(id){
   const s=state(d),of=openFault(d),di=dueIn(d);
   let h='<div class="top"><a class="back" href="#/devices">‹ Devices</a></div>';
   h+='<div class="hero" style="--c:'+s.c+'"><div class="band"><span>'+s.label+'</span><span>'+esc(d.id)+'</span></div><div class="body"><h1 style="font-size:24px">'+esc(d.name)+'</h1><div class="id">'+esc(d.ward)+(d.category?' · '+esc(d.category):'')+(d.critical?' · Critical equipment':'')+'</div>';
-  h+='<dl class="kv"><dt>Make and model</dt><dd>'+esc(d.model||'-')+'</dd><dt>Serial number</dt><dd>'+esc(d.serial||'-')+'</dd><dt>Service schedule</dt><dd>'+intervalLabel(d.ppmDays)+'</dd><dt>Last serviced</dt><dd>'+(d.ppmDays||d.baseline?fmt(lastService(d)):'-')+'</dd>'+(di!==null?'<dt>Next service</dt><dd>'+fmt(new Date((dayNum(lastService(d))+Number(d.ppmDays))*864e5).toISOString().slice(0,10))+(di<0?' ('+(-di)+' days overdue)':'')+'</dd>':'')+(d.warrantyUntil?'<dt>Warranty ends</dt><dd>'+fmt(d.warrantyUntil)+(dayNum(d.warrantyUntil)<dayNum(today())?' (expired)':'')+'</dd>':'')+(d.vendor?'<dt>Vendor</dt><dd>'+esc(d.vendor)+'</dd>':'')+(d.vendorPhone?'<dt>Vendor phone</dt><dd><a href="tel:'+esc(d.vendorPhone)+'" style="color:var(--brand);font-weight:600">'+esc(d.vendorPhone)+'</a></dd>':'')+'</dl></div></div>';
+  h+='<dl class="kv"><dt>Make and model</dt><dd>'+esc(d.model||'-')+'</dd><dt>Serial number</dt><dd>'+esc(d.serial||'-')+'</dd><dt>Service schedule</dt><dd>'+intervalLabel(d.ppmDays)+'</dd><dt>Last serviced</dt><dd>'+(d.ppmDays||d.baseline?fmt(lastService(d)):'-')+'</dd>'+(di!==null?'<dt>Next service</dt><dd>'+fmt(new Date((dayNum(lastService(d))+Number(d.ppmDays))*864e5).toISOString().slice(0,10))+(di<0?' ('+(-di)+' days overdue)':'')+'</dd>':'')+(d.warrantyUntil?'<dt>Warranty ends</dt><dd>'+fmt(d.warrantyUntil)+(dayNum(d.warrantyUntil)<dayNum(today())?' (expired)':'')+'</dd>':'')+(d.vendor?'<dt>Vendor</dt><dd>'+esc(d.vendor)+'</dd>':'')+(d.replacementCost!==''?'<dt>Replacement cost</dt><dd>'+naira(d.replacementCost)+'</dd><dt>Repairs so far</dt><dd>'+naira(repairTotal(d))+'</dd>':'')+(d.vendorPhone?'<dt>Vendor phone</dt><dd><a href="tel:'+esc(d.vendorPhone)+'" style="color:var(--brand);font-weight:600">'+esc(d.vendorPhone)+'</a></dd>':'')+'</dl></div></div>';
+  const rf=replaceFlag(d);
+  if(rf)h+='<div class="fault" style="background:color-mix(in srgb,var(--warn) 12%,var(--surface));border-color:color-mix(in srgb,var(--warn) 45%,var(--line))"><h3>Consider replacing</h3><p>Repairs so far cost '+naira(rf.total)+', which is '+rf.pct+'% of the '+naira(rf.rc)+' replacement cost.</p></div>';
   if(of){
     h+='<div class="fault"><div style="display:flex;justify-content:space-between;gap:8px"><h3>Open fault</h3><span class="pill bad">'+(of.priority==='Urgent'?'Urgent · ':'')+esc(of.stage)+'</span></div><p>'+esc(of.desc)+'</p><p class="small muted">Reported '+fmt(of.reportedAt)+(of.reporter?' by '+esc(of.reporter):'')+' · down '+daysOpen(of)+' day'+(daysOpen(of)===1?'':'s')+'</p>'+(of.photoPath?'<p><button class="btn" data-act="photo" data-path="'+esc(of.photoPath)+'">View photo</button></p>':'')+'<div class="btnrow"><button class="btn" data-act="stage" data-id="'+of.id+'">Update status</button><button class="btn primary" data-act="resolve" data-id="'+of.id+'">Mark as fixed</button></div></div>';
   }
@@ -440,7 +451,7 @@ function viewDevice(id){
     h+='<div class="actions">'+(of?'':'<button class="btn primary" data-act="report" data-id="'+d.id+'">Report fault</button>')+'<button class="btn" data-act="service" data-id="'+d.id+'">Log service</button><a class="btn" href="#/label/'+esc(d.id)+'">QR label</a>'+(of?'<button class="btn" data-act="report" data-id="'+d.id+'">Report another fault</button>':'')+'</div>';
   } else h+='<div class="actions"><a class="btn wide" href="#/label/'+esc(d.id)+'">QR label</a></div>';
   const items=[];
-  S.faults.filter(f=>f.deviceId===d.id).forEach(f=>{items.push({date:f.reportedAt,c:'var(--bad)',t:'Fault: '+f.desc,m:(f.reporter?'Reported by '+f.reporter+'. ':'')+(f.resolvedAt?'Fixed '+fmt(f.resolvedAt)+' after '+daysOpen(f)+' day'+(daysOpen(f)===1?'':'s')+'. '+f.action+(f.cost!==''&&f.cost!=null?' Cost '+naira(f.cost)+'.':''):'Still open.'),photo:f.photoPath});});
+  S.faults.filter(f=>f.deviceId===d.id).forEach(f=>{items.push({date:f.reportedAt,c:'var(--bad)',t:'Fault: '+f.desc,m:(f.reporter?'Reported by '+f.reporter+'. ':'')+(f.resolvedAt?'Fixed '+fmt(f.resolvedAt)+' after '+daysOpen(f)+' day'+(daysOpen(f)===1?'':'s')+'. '+f.action+(f.repairedBy?' Fixed by '+f.repairedBy+'.':'')+(f.hours!==''?' '+f.hours+' hrs.':'')+(f.parts?' Parts: '+f.parts+'.':'')+(f.cost!==''&&f.cost!=null?' Cost '+naira(f.cost)+'.':''):'Still open.'),photo:f.photoPath});});
   S.services.filter(x=>x.deviceId===d.id).forEach(x=>{items.push({date:x.date,c:'var(--brand)',t:(x.type==='PPM'?'Planned maintenance':x.type),m:[x.notes,x.by?'By '+x.by:''].filter(Boolean).join('. ')});});
   items.sort((a,b)=>b.date.localeCompare(a.date));
   h+='<div class="sec"><h2>History</h2>';
@@ -459,29 +470,35 @@ function viewLabels(){
   return '<div class="top"><a class="back" href="#/devices">‹ Devices</a><button class="btn noprint" data-act="print">Print</button></div><h1>QR labels</h1><p class="sub noprint">One label per active device.</p><div class="grid">'+S.devices.filter(d=>!d.retired).sort((a,b)=>a.id.localeCompare(b.id)).map(d=>'<div class="lab"><div class="qr">'+qrSvg(d.id)+'</div><b>'+esc(d.id)+'</b><span>'+esc(d.name)+'<br>'+esc(d.ward)+'</span></div>').join('')+'</div>';
 }
 
-let stream=null,scanRaf=0,scanning=false;
+let stream=null,scanRaf=0,scanning=false,scanCb=null,lastHit=0;
+function scanBlock(manualAct,manualLabel){
+  return '<div class="cam" id="cam"><video id="vid" playsinline muted></video><div class="frame"></div></div><div id="scanMsg" class="note">Starting camera...</div><input type="file" id="shot" accept="image/*" capture="environment" hidden><button class="btn primary block" style="margin-top:12px" data-act="shot">Take photo of QR label</button><label class="f">Or type the device ID<input id="manual" placeholder="EQ-0001" autocapitalize="characters" autocomplete="off"></label><div class="btnrow"><button class="btn" data-act="'+manualAct+'">'+manualLabel+'</button></div>';
+}
 function viewScan(){
-  return '<h1>Scan</h1><p class="sub">Point the camera at a device QR label.</p><div class="cam" id="cam"><video id="vid" playsinline muted></video><div class="frame"></div></div><div id="scanMsg" class="note">Starting camera...</div><input type="file" id="shot" accept="image/*" capture="environment" hidden><button class="btn primary block" style="margin-top:12px" data-act="shot">Take photo of QR label</button><label class="f">Or type the device ID<input id="manual" placeholder="EQ-0001" autocapitalize="characters" autocomplete="off"></label><div class="btnrow"><button class="btn" data-act="manualGo">Open device</button></div>';
+  return '<h1>Scan</h1><p class="sub">Point the camera at a device QR label.</p>'+scanBlock('manualGo','Open device');
 }
 function startScan(){
   const vid=$('#vid'),msg=$('#scanMsg');if(!vid)return;
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg.textContent='Live camera is not available here. Tap Take photo of QR label instead, or type the device ID.';$('#cam').style.display='none';return;}
-  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}}).then(s=>{
-    stream=s;scanning=true;vid.srcObject=s;vid.play();msg.textContent='Looking for a QR code...';
+  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}}).then(s=>{
+    stream=s;scanning=true;vid.srcObject=s;vid.play();msg.textContent=typeof jsQR==='function'?'Looking for a QR code...':'Scanner did not load. Check your connection and reload the page.';
     const cv=document.createElement('canvas'),cx=cv.getContext('2d',{willReadFrequently:true});
     const tick=()=>{
       if(!scanning)return;
       if(vid.readyState>=2&&typeof jsQR==='function'){
-        cv.width=vid.videoWidth;cv.height=vid.videoHeight;cx.drawImage(vid,0,0);
-        const im=cx.getImageData(0,0,cv.width,cv.height),r=jsQR(im.data,im.width,im.height);
-        if(r&&r.data){const id=parseId(r.data);if(id){stopScan();location.hash='#/d/'+id;return;}msg.textContent='That code is not an equipment label.';}
+        const k=Math.min(1,800/Math.max(vid.videoWidth,vid.videoHeight));
+        cv.width=Math.max(1,Math.round(vid.videoWidth*k));cv.height=Math.max(1,Math.round(vid.videoHeight*k));cx.drawImage(vid,0,0,cv.width,cv.height);
+        const im=cx.getImageData(0,0,cv.width,cv.height),r=jsQR(im.data,im.width,im.height,{inversionAttempts:'dontInvert'});
+        if(r&&r.data){const id=parseId(r.data);if(id){if(scanCb){if(Date.now()-lastHit>2000){lastHit=Date.now();scanCb(id);}}else{stopScan();location.hash='#/d/'+id;return;}}else msg.textContent='That code is not an equipment label.';}
       }
       scanRaf=requestAnimationFrame(tick);
     };tick();
   }).catch(()=>{msg.textContent='Live camera is blocked. Tap Take photo of QR label instead, or type the device ID.';$('#cam').style.display='none';});
 }
 function decodePhoto(file){
-  const msg=$('#scanMsg');msg.textContent='Reading photo...';
+  const msg=$('#scanMsg');
+  if(typeof jsQR!=='function'){msg.textContent='Scanner did not load. Check your connection and reload the page.';return;}
+  msg.textContent='Reading photo...';
   const img=new Image(),url=URL.createObjectURL(file);
   img.onload=()=>{
     URL.revokeObjectURL(url);
@@ -494,7 +511,7 @@ function decodePhoto(file){
       const im=cx.getImageData(0,0,cv.width,cv.height),r=jsQR(im.data,im.width,im.height,{inversionAttempts:'attemptBoth'});
       if(r&&r.data)found=parseId(r.data);
     });
-    if(found){location.hash='#/d/'+found;}
+    if(found){if(scanCb){scanCb(found);msg.textContent='Looking for a QR code...';}else location.hash='#/d/'+found;}
     else{msg.textContent='No QR code found. Move closer, keep the label flat and well lit, then try again.';}
   };
   img.onerror=()=>{msg.textContent='Could not open that photo. Try again.';};
@@ -507,15 +524,90 @@ function viewMore(){
   return '<h1>Account</h1><p class="sub">Signed in as '+esc(session&&session.user.email)+'</p>'+
   '<div class="list">'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Monthly report</div><div class="m">Uptime, faults, costs and overdue servicing, ready to print for management.</div><div class="btnrow"><a class="btn primary" href="#/report">Open monthly report</a></div></div>'+
+  '<div class="tag" style="--c:var(--brand)"><div class="n">Ward audit</div><div class="m">Walk a ward, scan every device, and see what is missing or in the wrong place.</div><div class="btnrow"><a class="btn primary" href="#/audit">'+(audit?'Continue audit':'Start an audit')+'</a></div></div>'+
+  '<div class="tag" style="--c:var(--brand)"><div class="n">Handover pack</div><div class="m">One Excel file with every device, fault, service and audit, for the next engineer or your records.</div><div class="btnrow"><button class="btn" data-act="handover">Download handover pack</button></div></div>'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Import devices from Excel</div><div class="m">Add many devices at once from a spreadsheet instead of typing each one.</div><div class="btnrow"><a class="btn" href="#/import">Import devices</a></div></div>'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Fault log for reports</div><div class="m">Spreadsheet of every fault with days down and cost.</div><div class="btnrow"><button class="btn" data-act="exportCsv">Download fault log (CSV)</button></div></div>'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Full backup</div><div class="m">All devices, faults and services as one file. Keep a copy somewhere safe each month.</div><div class="btnrow"><button class="btn" data-act="exportJson">Download backup</button></div></div>'+
   '<div class="tag" style="--c:var(--retired)"><div class="n">Data</div><div class="m">'+S.devices.length+' devices · '+S.faults.length+' faults · '+S.services.length+' services</div><div class="btnrow"><button class="btn" data-act="signout">Sign out</button></div></div></div>';
 }
 
+/* ---------- ward audit ---------- */
+let audit=null;
+try{audit=JSON.parse(localStorage.getItem('eq-audit')||'null');}catch(e){}
+function saveAudit(){try{if(audit)localStorage.setItem('eq-audit',JSON.stringify(audit));else localStorage.removeItem('eq-audit');}catch(e){}}
+function auditExpected(){return S.devices.filter(d=>!d.retired&&d.ward===audit.ward);}
+function auditListsHtml(){
+  const exp=auditExpected(),found=new Set(audit.found);
+  let h='<h2>On this ward <small>'+exp.filter(d=>found.has(d.id)).length+' of '+exp.length+' found</small></h2>';
+  h+=exp.length?'<div class="list">'+exp.map(d=>{const f=found.has(d.id);return '<button class="tag" style="--c:'+(f?'var(--ok)':'var(--retired)')+';text-align:left;width:100%;font:inherit;color:inherit;cursor:pointer" data-act="auditToggle" data-id="'+esc(d.id)+'"><div class="t"><div><div class="n">'+esc(d.name)+'</div><div class="m">'+esc(d.id)+'</div></div><span class="pill '+(f?'ok':'off')+'">'+(f?'Found':'Not seen')+'</span></div></button>';}).join('')+'</div>':'<div class="empty">No devices are registered to this ward.</div>';
+  if(audit.extra.length)h+='<h2 style="margin-top:18px">Found here, registered elsewhere</h2><div class="list">'+audit.extra.map(id=>{const d=dev(id);return d?'<div class="tag" style="--c:var(--warn)"><div class="n">'+esc(d.name)+'</div><div class="m">'+esc(d.id)+' · registered to '+esc(d.ward)+'</div></div>':'';}).join('')+'</div>';
+  return h;
+}
+function auditMark(id){
+  if(!audit||audit.stage!=='scan')return;
+  const d=dev(id);
+  if(!d){toast('Unknown device '+id);return;}
+  if(d.retired){toast(d.name+' is retired');return;}
+  if(d.ward===audit.ward){
+    if(audit.found.indexOf(id)<0){audit.found.push(id);toast('Found: '+d.name);}else toast('Already ticked: '+d.name);
+  }else{
+    if(audit.extra.indexOf(id)<0)audit.extra.push(id);
+    toast(d.name+' is registered to '+d.ward);
+  }
+  saveAudit();const el=$('#auditLists');if(el)el.innerHTML=auditListsHtml();
+}
+function viewAudit(){
+  let h='<div class="top"><a class="back" href="#/more">‹ Account</a></div><h1>Ward audit</h1>';
+  if(!audit){
+    const wards=Array.from(new Set(S.devices.filter(d=>!d.retired).map(d=>d.ward))).sort();
+    h+='<p class="sub">Check that the equipment on paper matches the equipment on the ward.</p>';
+    if(!wards.length)return h+'<div class="empty">Add devices first.</div>';
+    h+='<label class="f">Ward to audit<select id="auditWard">'+wards.map(w=>'<option>'+esc(w)+'</option>').join('')+'</select></label><div class="btnrow"><button class="btn primary" data-act="auditStart">Start audit</button></div>';
+    h+='<div class="sec"><h2>Past audits</h2>';
+    h+=S.audits.length?'<div class="list">'+S.audits.slice(0,10).map(a=>'<div class="tag" style="--c:'+(a.missing.length?'var(--warn)':'var(--ok)')+'"><div class="t"><div class="n">'+esc(a.ward)+'</div><span class="pill '+(a.missing.length?'warn':'ok')+'">'+a.found+' of '+a.expected+' found</span></div><div class="m">'+fmt(a.date)+'</div>'+(a.missing.length?'<div class="d">Missing: '+a.missing.map(m=>esc(m.name)).join(', ')+'</div>':'')+(a.unexpected.length?'<div class="d muted">Extra here: '+a.unexpected.map(m=>esc(m.name)+' (from '+esc(m.from)+')').join(', ')+'</div>':'')+'</div>').join('')+'</div>':'<div class="empty">No audits saved yet.</div>';
+    return h+'</div>';
+  }
+  if(audit.stage==='summary'){
+    const exp=auditExpected(),found=new Set(audit.found),missing=exp.filter(d=>!found.has(d.id));
+    h+='<p class="sub">'+esc(audit.ward)+' · summary</p><div class="stats"><div class="stat"><b>'+exp.filter(d=>found.has(d.id)).length+' of '+exp.length+'</b><span>Found</span></div><div class="stat"><b>'+missing.length+'</b><span>Missing</span></div></div>';
+    h+='<div class="sec"><h2>Missing</h2>'+(missing.length?'<div class="list">'+missing.map(d=>'<div class="tag" style="--c:var(--bad)"><div class="n">'+esc(d.name)+'</div><div class="m">'+esc(d.id)+'</div></div>').join('')+'</div>':'<div class="empty">Nothing missing.</div>')+'</div>';
+    h+='<div class="sec"><h2>Found here, registered elsewhere</h2>'+(audit.extra.length?'<div class="list">'+audit.extra.map(id=>{const d=dev(id);return d?'<div class="tag" style="--c:var(--warn)"><div class="n">'+esc(d.name)+'</div><div class="m">'+esc(d.id)+' · registered to '+esc(d.ward)+'</div><div class="btnrow"><button class="btn" data-act="auditMove" data-id="'+esc(d.id)+'">Move to '+esc(audit.ward)+'</button></div></div>':'';}).join('')+'</div>':'<div class="empty">None.</div>')+'</div>';
+    h+='<div class="btnrow"><button class="btn" data-act="auditBack">Back to scanning</button><button class="btn primary" data-act="auditSave">Save audit</button></div>';
+    return h;
+  }
+  h+='<p class="sub">Auditing <b>'+esc(audit.ward)+'</b>. Scan each device, or tap it in the list.</p>'+scanBlock('auditManual','Tick device');
+  h+='<div class="sec" id="auditLists">'+auditListsHtml()+'</div>';
+  h+='<div class="btnrow"><button class="btn danger" data-act="auditCancel">Cancel audit</button><button class="btn primary" data-act="auditFinish">Finish audit</button></div>';
+  return h;
+}
+async function auditSave(){
+  const exp=auditExpected(),found=new Set(audit.found);
+  const row={ward:audit.ward,expected:exp.length,found:exp.filter(d=>found.has(d.id)).length,missing:exp.filter(d=>!found.has(d.id)).map(d=>({id:d.id,name:d.name})),unexpected:audit.extra.map(id=>{const d=dev(id);return {id:id,name:d?d.name:id,from:d?d.ward:''};})};
+  const r=await sb.from('audits').insert(row);
+  if(r.error){toast(r.error.message);return;}
+  audit=null;saveAudit();await loadAll();toast('Audit saved');render();
+}
+
+/* ---------- handover pack ---------- */
+function addDays(ds,n){return new Date((dayNum(ds)+Number(n))*864e5).toISOString().slice(0,10);}
+function exportHandover(){
+  if(typeof XLSX==='undefined'){toast('Export tool did not load. Check your connection and reload.');return;}
+  const wb=XLSX.utils.book_new();
+  const add=(name,rows,widths)=>{const ws=XLSX.utils.aoa_to_sheet(rows);if(widths)ws['!cols']=widths.map(w=>({wch:w}));XLSX.utils.book_append_sheet(wb,ws,name);};
+  const total=S.faults.reduce((n,f)=>n+(f.cost===''||f.cost==null?0:Number(f.cost)),0);
+  add('Summary',[['Equipment handover pack'],['Generated',fmt(today())],['Prepared by',session&&session.user.email],[],['Active devices',S.devices.filter(d=>!d.retired).length],['Retired devices',S.devices.filter(d=>d.retired).length],['Faults logged',S.faults.length],['Open faults',S.faults.filter(f=>!f.resolvedAt).length],['Total repair cost (NGN)',total],['Services logged',S.services.length],['Audits recorded',S.audits.length],[],['Note','Fault photos are not included in this file. Keep the Supabase project and app login details safe for the next engineer.']],[28,60]);
+  add('Devices',[['ID','Name','Type','Make and model','Serial','Ward','Critical','Status','Service interval (days)','Last serviced','Next service due','Warranty ends','Vendor','Vendor phone','Replacement cost (NGN)','Repairs to date (NGN)','Faults logged']].concat(S.devices.map(d=>[d.id,d.name,d.category,d.model,d.serial,d.ward,d.critical?'Yes':'',state(d).label,d.ppmDays||'',d.ppmDays||d.baseline?lastService(d):'',d.ppmDays?addDays(lastService(d),d.ppmDays):'',d.warrantyUntil,d.vendor,d.vendorPhone,d.replacementCost,repairTotal(d),S.faults.filter(f=>f.deviceId===d.id).length])),[10,26,18,24,16,16,9,16,12,13,13,13,18,15,14,14,9]);
+  add('Faults',[['Device ID','Device','Ward','Reported','Priority','Fault','Reported by','Stage','Fixed on','Days down','Action taken','Fixed by','Hours','Parts used','Cost (NGN)']].concat(S.faults.slice().sort((a,b)=>b.reportedAt.localeCompare(a.reportedAt)).map(f=>{const d=dev(f.deviceId)||{};return [d.id,d.name,d.ward,f.reportedAt,f.priority,f.desc,f.reporter,f.stage,f.resolvedAt||'',daysOpen(f),f.action,f.repairedBy,f.hours,f.parts,f.cost];})),[10,24,14,12,9,40,16,13,12,9,36,16,7,22,12]);
+  add('Services',[['Device ID','Device','Date','Type','Notes','Done by']].concat(S.services.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(x=>{const d=dev(x.deviceId)||{};return [d.id,d.name,x.date,x.type,x.notes,x.by];})),[10,24,12,14,40,16]);
+  add('Audits',[['Date','Ward','Expected','Found','Missing','Found elsewhere']].concat(S.audits.map(a=>[a.date,a.ward,a.expected,a.found,a.missing.map(m=>m.name).join(', '),a.unexpected.map(m=>m.name+' (from '+m.from+')').join(', ')])),[12,16,9,7,40,40]);
+  XLSX.writeFile(wb,'equipment-handover-'+today()+'.xlsx');
+  toast('Handover pack saved');
+}
+
 /* ---------- import devices ---------- */
 let importRows=[],importSkipped=[];
-const HMAP={name:['name','device','devicename','equipment','item'],category:['type','category','devicetype'],model:['model','makeandmodel','makemodel','make'],serial:['serial','serialnumber','serialno','sn'],ward:['ward','location','department','unit'],interval:['serviceinterval','serviceintervaldays','intervaldays','interval','servicedays','ppm','ppmdays','serviceschedule'],critical:['critical','criticalyesno','criticalyn','criticalequipment'],last:['lastserviced','lastserviceddate','lastservice','lastservicedate','lastppm'],warranty:['warranty','warrantyuntil','warrantyends','warrantyenddate','warrantyexpiry','warrantyend'],vendor:['vendor','supplier'],vendorPhone:['vendorphone','supplierphone','phone']};
+const HMAP={name:['name','device','devicename','equipment','item'],category:['type','category','devicetype'],model:['model','makeandmodel','makemodel','make'],serial:['serial','serialnumber','serialno','sn'],ward:['ward','location','department','unit'],interval:['serviceinterval','serviceintervaldays','intervaldays','interval','servicedays','ppm','ppmdays','serviceschedule'],critical:['critical','criticalyesno','criticalyn','criticalequipment'],last:['lastserviced','lastserviceddate','lastservice','lastservicedate','lastppm'],warranty:['warranty','warrantyuntil','warrantyends','warrantyenddate','warrantyexpiry','warrantyend'],vendor:['vendor','supplier'],vendorPhone:['vendorphone','supplierphone','phone'],replacement:['replacementcost','replacementprice','purchaseprice','price']};
 function normH(h){return String(h).toLowerCase().replace(/[^a-z]/g,'');}
 function pickCol(row,key){for(const k of Object.keys(row)){if(HMAP[key].indexOf(normH(k))>=0)return row[k];}return '';}
 function toDateStr(v){
@@ -548,7 +640,7 @@ function parseSheet(rows){
     if(!name){importSkipped.push('Row '+n+': no device name');return;}
     if(!ward){importSkipped.push('Row '+n+': no ward or location for '+name);return;}
     const w=pickCol(r,'warranty'),l=pickCol(r,'last');
-    importRows.push({name:name.slice(0,120),category:String(pickCol(r,'category')).trim()||null,model:String(pickCol(r,'model')).trim()||null,serial:String(pickCol(r,'serial')).trim()||null,ward:ward,ppm_days:toInterval(pickCol(r,'interval')),critical:/^(y|yes|true|1|critical)$/i.test(String(pickCol(r,'critical')).trim()),baseline:toDateStr(l),warranty_until:toDateStr(w),vendor:String(pickCol(r,'vendor')).trim()||null,vendor_phone:String(pickCol(r,'vendorPhone')).trim()||null});
+    importRows.push({name:name.slice(0,120),category:String(pickCol(r,'category')).trim()||null,model:String(pickCol(r,'model')).trim()||null,serial:String(pickCol(r,'serial')).trim()||null,ward:ward,ppm_days:toInterval(pickCol(r,'interval')),critical:/^(y|yes|true|1|critical)$/i.test(String(pickCol(r,'critical')).trim()),baseline:toDateStr(l),warranty_until:toDateStr(w),vendor:String(pickCol(r,'vendor')).trim()||null,vendor_phone:String(pickCol(r,'vendorPhone')).trim()||null,replacement_cost:(function(){const v=pickCol(r,'replacement');const n=Number(String(v).replace(/[^0-9.]/g,''));return v!==''&&n>0?n:null;})()});
   });
 }
 function viewImport(){
@@ -595,7 +687,7 @@ async function doImport(){
   await loadAll();toast(done+' devices imported');location.hash='#/devices';render();
 }
 function downloadTemplate(){
-  const rows=[['Name','Type','Make and model','Serial number','Ward','Service interval (days)','Critical (yes/no)','Last serviced','Warranty ends','Vendor','Vendor phone'],['Patient monitor','Patient monitor','Mindray BeneView T5','SN12345','ICU','180','yes','2026-06-15','2027-03-01','MedSupply Ltd','08012345678'],['Suction machine','Suction machine','','','Theatre','90','yes','','','','']];
+  const rows=[['Name','Type','Make and model','Serial number','Ward','Service interval (days)','Critical (yes/no)','Last serviced','Warranty ends','Vendor','Vendor phone','Replacement cost'],['Patient monitor','Patient monitor','Mindray BeneView T5','SN12345','ICU','180','yes','2026-06-15','2027-03-01','MedSupply Ltd','08012345678','1500000'],['Suction machine','Suction machine','','','Theatre','90','yes','','','','','']];
   saveFile('device-import-template.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'),'text/csv');
 }
 
@@ -628,6 +720,9 @@ function viewReport(){
   h+=top.length?'<div class="tbl"><table><tr><th>Device</th><th>Ward</th><th>Days down</th></tr>'+top.map(d=>'<tr><td>'+esc(d.name)+' <span class="muted">'+esc(d.id)+'</span></td><td>'+esc(d.ward)+'</td><td>'+dt[d.id]+'</td></tr>').join('')+'</table></div>':'<div class="empty">No downtime this month.</div>';
   h+='</div><div class="sec"><h2>Faults reported</h2>';
   h+=reported.length?'<div class="tbl"><table><tr><th>Date</th><th>Device</th><th>Fault</th><th>Days down</th><th>Cost</th></tr>'+reported.map(f=>{const d=dev(f.deviceId)||{name:'(deleted)',ward:''};return '<tr><td>'+fmt(f.reportedAt)+'</td><td>'+esc(d.name)+'<br><span class="muted">'+esc(d.ward)+'</span></td><td>'+esc(f.desc)+(f.action?'<br><span class="muted">Fix: '+esc(f.action)+'</span>':'')+'</td><td>'+daysOpen(f)+(f.resolvedAt?'':' (open)')+'</td><td>'+(f.cost===''||f.cost==null?'-':naira(f.cost))+'</td></tr>';}).join('')+'</table></div>':'<div class="empty">No faults reported this month.</div>';
+  const rv=act.filter(d=>replaceFlag(d));
+  h+='</div><div class="sec"><h2>Repair or replace review</h2>';
+  h+=rv.length?'<div class="tbl"><table><tr><th>Device</th><th>Ward</th><th>Repairs to date</th><th>Replacement cost</th></tr>'+rv.map(d=>{const rf=replaceFlag(d);return '<tr><td>'+esc(d.name)+' <span class="muted">'+esc(d.id)+'</span></td><td>'+esc(d.ward)+'</td><td>'+naira(rf.total)+' ('+rf.pct+'%)</td><td>'+naira(rf.rc)+'</td></tr>';}).join('')+'</table></div>':'<div class="empty">No device has used up half its replacement cost.</div>';
   h+='</div><div class="sec"><h2>Services overdue now</h2>';
   h+=overdue.length?'<div class="tbl"><table><tr><th>Device</th><th>Ward</th><th>Overdue by</th></tr>'+overdue.map(d=>'<tr><td>'+esc(d.name)+' <span class="muted">'+esc(d.id)+'</span></td><td>'+esc(d.ward)+'</td><td>'+(-dueIn(d))+' days</td></tr>').join('')+'</table></div>':'<div class="empty">Nothing overdue.</div>';
   h+='</div>';
@@ -704,14 +799,14 @@ function saveFile(name,text,type){
 }
 function csvCell(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
 function exportCsv(){
-  const rows=[['Device ID','Device','Ward','Reported','Priority','Fault','Reported by','Stage','Fixed on','Days down','Action taken','Cost (NGN)']];
-  S.faults.slice().sort((a,b)=>b.reportedAt.localeCompare(a.reportedAt)).forEach(f=>{const d=dev(f.deviceId)||{};rows.push([d.id,d.name,d.ward,f.reportedAt,f.priority,f.desc,f.reporter,f.stage,f.resolvedAt||'',daysOpen(f),f.action,f.cost]);});
+  const rows=[['Device ID','Device','Ward','Reported','Priority','Fault','Reported by','Stage','Fixed on','Days down','Action taken','Fixed by','Hours spent','Parts used','Cost (NGN)']];
+  S.faults.slice().sort((a,b)=>b.reportedAt.localeCompare(a.reportedAt)).forEach(f=>{const d=dev(f.deviceId)||{};rows.push([d.id,d.name,d.ward,f.reportedAt,f.priority,f.desc,f.reporter,f.stage,f.resolvedAt||'',daysOpen(f),f.action,f.repairedBy,f.hours,f.parts,f.cost]);});
   saveFile('fault-log-'+today()+'.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'),'text/csv');
 }
 
 /* ---------- router ---------- */
 function render(){
-  stopScan();
+  stopScan();scanCb=null;
   const raw=location.hash.slice(1)||'/';
   const qi=raw.indexOf('?');const path=qi>=0?raw.slice(0,qi):raw;
   const q={};if(qi>=0)raw.slice(qi+1).split('&').forEach(p=>{const kv=p.split('=');q[kv[0]]=decodeURIComponent(kv[1]||'');});
@@ -731,11 +826,12 @@ function render(){
     case 'more':nav='more';h=viewMore();break;
     case 'report':nav='more';h=viewReport();break;
     case 'import':nav='more';h=viewImport();break;
+    case 'audit':nav='more';h=viewAudit();break;
     default:h=viewToday();
   }
   $('#app').innerHTML=h;
   document.querySelectorAll('nav.bar a').forEach(a=>{if(a.dataset.nav===nav)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});
-  if(p[0]==='scan'){startScan();const sh=$('#shot');if(sh)sh.addEventListener('change',e=>{const f=e.target.files[0];if(f)decodePhoto(f);});}
+  if(p[0]==='scan'||(p[0]==='audit'&&audit&&audit.stage==='scan')){if(p[0]==='audit')scanCb=auditMark;startScan();const sh=$('#shot');if(sh)sh.addEventListener('change',e=>{const f=e.target.files[0];if(f)decodePhoto(f);e.target.value='';});}
   const imf=$('#impFile');if(imf)imf.addEventListener('change',e=>{const f=e.target.files[0];if(f)readImportFile(f);});
   const rm=$('#rm');if(rm)rm.addEventListener('change',e=>{if(e.target.value){reportMonth=e.target.value;render();}});
   const qEl=$('#q');if(qEl)qEl.addEventListener('input',e=>{devQuery=e.target.value;const pos=e.target.selectionStart;render();const n=$('#q');if(n){n.focus();n.setSelectionRange(pos,pos);}});
@@ -774,10 +870,19 @@ document.addEventListener('click',async e=>{
       sheet('Which device?','<label class="f">Device<select name="id">'+act.map(d=>'<option value="'+esc(d.id)+'">'+esc(d.id)+' · '+esc(d.name)+' · '+esc(d.ward)+'</option>').join('')+'</select></label>',fd=>{closeSheet();faultForm(dev(fd.id));},'Next');break;}
     case 'shot':$('#shot').click();break;
     case 'photo':showPhoto(t.dataset.path);break;
+    case 'handover':exportHandover();break;
+    case 'auditStart':audit={ward:$('#auditWard').value,found:[],extra:[],stage:'scan'};saveAudit();render();break;
+    case 'auditToggle':{const i=audit.found.indexOf(id);if(i>=0)audit.found.splice(i,1);else audit.found.push(id);saveAudit();const el=$('#auditLists');if(el)el.innerHTML=auditListsHtml();break;}
+    case 'auditFinish':audit.stage='summary';saveAudit();render();break;
+    case 'auditBack':audit.stage='scan';saveAudit();render();break;
+    case 'auditCancel':if(confirm('Cancel this audit? Nothing will be saved.')){audit=null;saveAudit();render();}break;
+    case 'auditSave':await auditSave();break;
+    case 'auditMove':{if(await run(sb.from('devices').update({ward:audit.ward}).eq('id',id),'Moved to '+audit.ward)){audit.extra=audit.extra.filter(x=>x!==id);if(audit.found.indexOf(id)<0)audit.found.push(id);saveAudit();render();}break;}
     case 'template':downloadTemplate();break;
     case 'pickImport':$('#impFile').click();break;
     case 'doImport':doImport();break;
     case 'manualGo':{const pid=parseId(($('#manual').value||'').trim());if(pid)location.hash='#/d/'+pid;else toast('Enter an ID like EQ-0001');break;}
+    case 'auditManual':{const pid=parseId(($('#manual').value||'').trim());if(pid){auditMark(pid);$('#manual').value='';}else toast('Enter an ID like EQ-0001');break;}
     case 'exportJson':saveFile('equipment-backup-'+today()+'.json',JSON.stringify(S,null,2),'application/json');break;
     case 'exportCsv':exportCsv();break;
     case 'signout':await sb.auth.signOut();break;
@@ -786,7 +891,7 @@ document.addEventListener('click',async e=>{
 });
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape')closeSheet();
-  if(e.key==='Enter'&&e.target.id==='manual'){e.preventDefault();const pid=parseId(e.target.value);if(pid)location.hash='#/d/'+pid;else toast('Enter an ID like EQ-0001');}
+  if(e.key==='Enter'&&e.target.id==='manual'){e.preventDefault();const pid=parseId(e.target.value);if(!pid)toast('Enter an ID like EQ-0001');else if(scanCb){scanCb(pid);e.target.value='';}else location.hash='#/d/'+pid;}
 });
 window.addEventListener('hashchange',()=>{closeSheet();render();window.scrollTo(0,0);});
 
@@ -794,7 +899,7 @@ window.addEventListener('hashchange',()=>{closeSheet();render();window.scrollTo(
 sb.auth.onAuthStateChange(async (ev,s)=>{
   const was=!!session;session=s;
   if(session&&!was){await loadAll();render();}
-  else if(!session&&was){S={devices:[],faults:[],services:[]};loaded=false;render();}
+  else if(!session&&was){S={devices:[],faults:[],services:[],audits:[]};loaded=false;render();}
 });
 if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 (async function init(){
@@ -805,7 +910,7 @@ if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.s
 })();
 function autoRefresh(){
   if(!session||document.hidden||!$('#sheet').hidden)return;
-  const h=location.hash;if(h.indexOf('#/r/')===0||h.indexOf('#/scan')===0||h.indexOf('#/import')===0)return;
+  const h=location.hash;if(h.indexOf('#/r/')===0||h.indexOf('#/scan')===0||h.indexOf('#/import')===0||h.indexOf('#/audit')===0)return;
   const ae=document.activeElement;if(ae&&/INPUT|TEXTAREA|SELECT/.test(ae.tagName))return;
   const before=new Set(S.faults.filter(f=>!f.resolvedAt).map(f=>f.id));
   loadAll().then(ok=>{
