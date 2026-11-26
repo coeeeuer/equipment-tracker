@@ -64,7 +64,7 @@ language sql
 stable
 security definer
 set search_path = ''
-as $
+as $$
   select exists (
     select 1
     from public.department_memberships m
@@ -73,7 +73,7 @@ as $
       and m.membership_role = 'asset_officer'
       and m.active = true
   )
-$;
+$$;
 
 create or replace function public.can_view_department(p_department_id uuid)
 returns boolean
@@ -191,7 +191,7 @@ create or replace function public.enforce_asset_location_department()
 returns trigger
 language plpgsql
 set search_path = ''
-as $
+as $$
 declare
   v_location_department uuid;
 begin
@@ -210,7 +210,7 @@ begin
   end if;
   return new;
 end;
-$;
+$$;
 
 drop trigger if exists assets_validate_location_department on public.assets;
 create trigger assets_validate_location_department
