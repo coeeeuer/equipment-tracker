@@ -870,7 +870,7 @@ function generatorForm(g){
     '<div class="two">'+f('Manufacturer','manufacturer',g.manufacturer)+f('Model','model',g.model)+'</div>'+
     '<div class="two">'+f('Serial number','serial',g.serial)+f('Manufacture date','manufactureDate',g.manufactureDate,'date')+'</div>'+
     '<div class="two">'+f('Installation date','installationDate',g.installationDate,'date')+f('Installation location','location',g.location)+'</div>'+
-    '<div class="two">'+field('Fuel type','fuelType',{value:g.fuelType||'Diesel',options:[['Diesel','Diesel'],['Natural gas','Natural gas'],['Other','Other'],['Unknown','Unknown']]})+field('Operational status','status',{value:g.status||'unknown',options:[['unknown','Not yet verified'],['operational','Operational'],['under_maintenance','Under maintenance'],['out_of_service','Out of service'],['retired','Retired']]})+'</div>'+
+    '<div class="two">'+field('Fuel type','fuelType',{value:g.fuelType||'Unknown',options:[['Unknown','Unknown'],['Diesel','Diesel'],['Natural gas','Natural gas'],['Other','Other']]})+field('Operational status','status',{value:g.status||'unknown',options:[['unknown','Not yet verified'],['operational','Operational'],['under_maintenance','Under maintenance'],['out_of_service','Out of service'],['retired','Retired']]})+'</div>'+
     '<h3 class="sec">Engine, alternator and controller</h3>'+
     '<div class="two">'+f('Engine manufacturer','engineManufacturer',g.engineManufacturer)+f('Engine model','engineModel',g.engineModel)+'</div>'+
     '<div class="two">'+f('Engine serial number','engineSerial',g.engineSerial)+f('Alternator manufacturer','alternatorManufacturer',g.alternatorManufacturer)+'</div>'+
@@ -918,6 +918,19 @@ function generatorLogForm(g,kind){
       async fd=>{const q=sb.from('generator_faults').insert({generator_id:g.id,reported_at:new Date(fd.date).toISOString(),description:fd.description,priority:fd.priority,reported_by:fd.by||session.user.email});if(await run(q,'Generator breakdown reported'))closeSheet();});
   }
 }
+function generatorFaultUpdateForm(f){
+  if(!canManageHospital()){toast('Your role cannot update generator breakdowns');return;}
+  sheet('Update generator breakdown',
+    field('Status','status',{value:f.status,options:[['Reported','Reported'],['In repair','In repair'],['Awaiting parts','Awaiting parts'],['Resolved','Resolved']]})+
+    field('Date resolved','resolvedAt',{type:'date',value:f.resolvedAt||today()})+
+    field('Action taken','action',{area:true,value:f.action||''})+
+    '<div class="two">'+field('Repaired by','by',{value:f.repairedBy||''})+field('Repair cost (₦)','cost',{type:'number',value:f.cost})+'</div>',
+    async fd=>{
+      const resolved=fd.status==='Resolved';
+      const q=sb.from('generator_faults').update({status:fd.status,resolved_at:resolved?(fd.resolvedAt||today()):null,action_taken:fd.action||null,repaired_by:fd.by||null,cost_ngn:numOrNull(fd.cost)}).eq('id',f.id);
+      if(await run(q,'Generator breakdown updated'))closeSheet();
+    });
+}
 function viewGenerator(id){
   const g=generatorById(id);
   let h='<div class="top"><a class="back" href="#/generators">‹ Generators</a>'+(g&&canManageHospital()?'<button class="btn" data-act="editGenerator" data-id="'+g.id+'">Edit</button>':'')+'</div>';
@@ -933,7 +946,7 @@ function viewGenerator(id){
   h+='</div><div class="sec"><h2>Service history <small>'+services.length+' entries</small></h2>';
   h+=services.length?'<div class="list">'+services.map(x=>'<div class="tag" style="--c:var(--brand)"><div class="n">'+fmt(x.date)+' · '+esc(x.type)+'</div><div class="d">'+esc(x.work)+'</div><div class="m">'+(x.hours!==''?esc(x.hours)+' hour-meter hours · ':'')+(x.by?'By '+esc(x.by):'')+'</div>'+(x.nextDate||x.nextHours!==''?'<div class="m">Next due: '+(x.nextDate?fmt(x.nextDate):'')+(x.nextHours!==''?' · '+esc(x.nextHours)+' hours':'')+'</div>':'')+'</div>').join('')+'</div>':'<div class="empty">No generator service records yet.</div>';
   h+='</div><div class="sec"><h2>Breakdown history <small>'+faults.length+' records</small></h2>';
-  h+=faults.length?'<div class="list">'+faults.map(x=>'<div class="tag" style="--c:'+(x.status==='Resolved'?'var(--ok)':'var(--bad)')+'"><div class="t"><div class="n">'+fmt(x.date.slice(0,10))+'</div><span class="pill '+(x.status==='Resolved'?'ok':'bad')+'">'+esc(x.status)+'</span></div><div class="d">'+esc(x.description)+'</div>'+(x.action?'<div class="m">Action: '+esc(x.action)+'</div>':'')+'</div>').join('')+'</div>':'<div class="empty">No breakdowns recorded.</div>';
+  h+=faults.length?'<div class="list">'+faults.map(x=>'<div class="tag" style="--c:'+(x.status==='Resolved'?'var(--ok)':'var(--bad)')+'"><div class="t"><div class="n">'+fmt(x.date.slice(0,10))+'</div><span class="pill '+(x.status==='Resolved'?'ok':'bad')+'">'+esc(x.status)+'</span></div><div class="d">'+esc(x.description)+'</div>'+(x.action?'<div class="m">Action: '+esc(x.action)+'</div>':'')+(canManageHospital()&&x.status!=='Resolved'?'<div class="btnrow"><button class="btn" data-act="updateGeneratorFault" data-id="'+x.id+'">Update breakdown</button></div>':'')+'</div>').join('')+'</div>':'<div class="empty">No breakdowns recorded.</div>';
   return h+'</div>';
 }
 
@@ -999,6 +1012,7 @@ document.addEventListener('click',async e=>{
     case 'fuelLog':{const g=generatorById(id);if(g)generatorLogForm(g,'fuel');break;}
     case 'generatorService':{const g=generatorById(id);if(g)generatorLogForm(g,'maintenance');break;}
     case 'generatorFault':{const g=generatorById(id);if(g)generatorLogForm(g,'fault');break;}
+    case 'updateGeneratorFault':{const f=S.generatorFaults.find(x=>x.id===id);if(f)generatorFaultUpdateForm(f);break;}
     case 'filter':devFilter=t.dataset.v;render();break;
     case 'refresh':if(await loadAll()){render();toast('Up to date');}break;
     case 'edit':deviceForm(dev(id));break;
