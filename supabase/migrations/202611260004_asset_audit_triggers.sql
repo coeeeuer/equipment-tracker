@@ -55,7 +55,7 @@ begin
   values (
     new.hospital_id,
     new.asset_id,
-    coalesce(new.recorded_by, auth.uid()),
+    auth.uid(),
     'transfer_recorded',
     jsonb_build_object(
       'from_department_id', new.from_department_id,
