@@ -4,10 +4,13 @@
 
 - Adds a hospital location directory for wards and departments.
 - Seeds the eight initial locations agreed for Central Hospital.
-- Adds a generator register separate from medical equipment.
+- Adds a generator register as a specialist module linked to the universal asset register by a canonical asset identity.
 - Adds individual generator profiles, basic refuelling records, service history and breakdown history.
 - Adds application roles for `admin`, `biomedical` and `viewer` on the new hospital modules.
 - Keeps existing `devices.ward` values as text for backward compatibility. Existing equipment, fault, service and audit tables are not altered by the migration.
+- Adds department-aware QR payloads while retaining support for legacy `EQ-…` labels.
+- Flags QR labels whose encoded department no longer matches the current device record.
+- Disables permanent device deletion in the interface; assets should be retired so their history remains available.
 - Bumps the service-worker cache version so installed app copies can receive the new interface.
 
 ## Important: database migration required
@@ -17,10 +20,12 @@ The new screens are deliberately fail-soft: if the migration has not been applie
 1. Take a current Supabase database backup.
 2. Open Supabase Dashboard → SQL Editor.
 3. Review and run `supabase/migrations/202611260001_central_hospital_modules.sql`.
-4. In Supabase Authentication → Users, identify the account that Central Hospital has designated as the first application administrator.
-5. Copy that user's Auth UUID and run the bootstrap statement at the bottom of the migration, replacing the placeholder UUID.
-6. Assign biomedical staff and read-only users by inserting their Auth UUIDs into `public.app_user_roles`, with role `biomedical` or `viewer`.
-7. Sign out and back in to refresh the app role, then verify access using one account per role.
+4. Review and run `supabase/migrations/202611260002_hospital_asset_foundation.sql` on the restored staging copy only. Verify the legacy-device backfill and department mappings before proceeding.
+5. Review and run `supabase/migrations/202611260003_link_generators_to_assets.sql` on staging. Confirm every generator profile links to exactly one canonical asset.
+6. In Supabase Authentication → Users, identify the account that Central Hospital has designated as the first application administrator.
+7. Copy that user's Auth UUID and run the bootstrap statement at the bottom of the migration, replacing the placeholder UUID.
+8. Assign biomedical staff and read-only users by inserting their Auth UUIDs into `public.app_user_roles`, with role `biomedical` or `viewer`.
+9. Sign out and back in to refresh the app role, then verify access using one account per role.
 
 Example role assignment (replace the UUID with the real Auth user UUID):
 
@@ -42,7 +47,7 @@ The repository does not contain a Supabase service-role key, and the application
 | viewer | Yes | No | No | No |
 | no role | No module access | No | No | No |
 
-The existing equipment module has its pre-existing permissions and policies; this migration does not silently change them. Before hospital-wide production use, an administrator should review the existing RLS policies for `devices`, `faults`, `services`, `audits` and the public QR-report RPC. The new role model does not automatically retrofit security onto those existing tables.
+The existing equipment module has its pre-existing permissions and policies; these migrations do not silently change them. The department-aware asset permissions and full user-to-department assignment workflow are not yet implemented. Before hospital-wide production use, an administrator should review the existing RLS policies for `devices`, `faults`, `services`, `audits` and the public QR-report RPC. The new role model does not automatically retrofit security onto those existing tables.
 
 ## Initial hospital locations
 
@@ -116,6 +121,9 @@ References:
 - [ ] Test a generator edit, refuelling entry, service entry and breakdown entry.
 - [ ] Verify each generator's history remains separate.
 - [ ] Verify existing equipment registration, QR fault reporting, audits, imports, exports and offline reporting still work.
+- [ ] Verify new QR labels contain the department name and, when configured, department directory ID.
+- [ ] Transfer a test device and confirm its old QR label displays a stale-location warning; print and test the replacement label.
+- [ ] Verify old QR labels still open the existing public fault-report route.
 - [ ] Verify installed PWA clients refresh to the new service-worker cache.
 - [ ] Review existing-table RLS policies before production rollout.
 
