@@ -84,8 +84,6 @@ select 'devices' as table_name, count(*)::bigint as row_count from public.device
 union all select 'faults', count(*)::bigint from public.faults
 union all select 'services', count(*)::bigint from public.services
 union all select 'audits', count(*)::bigint from public.audits
-union all select 'hospital_locations', count(*)::bigint from public.hospital_locations
-union all select 'generators', count(*)::bigint from public.generators
 order by table_name;
 
 -- 8) Department/ward distribution only (no equipment names or serial numbers).
