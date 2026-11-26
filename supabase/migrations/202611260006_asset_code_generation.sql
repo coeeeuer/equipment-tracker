@@ -13,7 +13,7 @@ create table if not exists public.asset_code_counters (
 
 insert into public.asset_code_counters(hospital_id, prefix, next_value)
 select id,
-       upper(left(regexp_replace(slug, '[^A-Za-z0-9]', '', 'g'), 2)),
+       case when position('-' in slug) > 0 then upper(left(split_part(slug, '-', 1), 1) || left(split_part(slug, '-', 2), 1)) else upper(left(regexp_replace(slug, '[^A-Za-z0-9]', '', 'g'), 2)) end,
        0
 from public.hospitals
 on conflict (hospital_id) do nothing;
@@ -39,7 +39,7 @@ begin
   loop
     insert into public.asset_code_counters(hospital_id, prefix, next_value)
     select new.hospital_id,
-           upper(left(regexp_replace(h.slug, '[^A-Za-z0-9]', '', 'g'), 2)),
+           case when position('-' in h.slug) > 0 then upper(left(split_part(h.slug, '-', 1), 1) || left(split_part(h.slug, '-', 2), 1)) else upper(left(regexp_replace(h.slug, '[^A-Za-z0-9]', '', 'g'), 2)) end,
            1
     from public.hospitals h
     where h.id = new.hospital_id
