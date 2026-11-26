@@ -1016,7 +1016,7 @@ function render(){
   stopScan();scanCb=null;
   const raw=location.hash.slice(1)||'/';
   const qi=raw.indexOf('?');const path=qi>=0?raw.slice(0,qi):raw;
-  const q={};if(qi>=0)raw.slice(qi+1).split('&').forEach(p=>{const kv=p.split('=');q[kv[0]]=decodeURIComponent(kv[1]||'');});
+  const q={};if(qi>=0)new URLSearchParams(raw.slice(qi+1)).forEach((v,k)=>{q[k]=v;});
   const p=path.split('/').filter(Boolean);
   const navEl=$('nav.bar');
   if(p[0]==='r'){navEl.style.display='none';renderPublic(decodeURIComponent(p[1]||'').toUpperCase(),q);return;}
