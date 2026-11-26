@@ -8,7 +8,7 @@ For Central Hospital, newly created canonical assets receive codes in the format
 
 `CH-000001`, `CH-000002`, and so on.
 
-The prefix is derived from the first two alphanumeric characters of the hospital slug. The counter is updated transactionally, so simultaneous inserts do not rely on a browser-generated number.
+The prefix is derived from the initials of the first two hyphen-separated parts of the hospital slug; `central-hospital` therefore produces `CH`. The counter is updated transactionally, so simultaneous inserts do not rely on a browser-generated number.
 
 ## Compatibility rules
 
