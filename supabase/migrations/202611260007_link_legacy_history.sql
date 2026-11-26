@@ -61,8 +61,10 @@ security definer
 set search_path = ''
 as $$
 begin
-  if tg_op = 'UPDATE' and new.device_id is distinct from old.device_id then
-    new.asset_id := null;
+  if tg_op = 'UPDATE' then
+    if new.device_id is distinct from old.device_id then
+      new.asset_id := null;
+    end if;
   end if;
 
   if new.asset_id is null and new.device_id is not null then
