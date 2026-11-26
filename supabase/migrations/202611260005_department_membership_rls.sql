@@ -227,3 +227,39 @@ commit;
 -- maintenance: can read only assets in active assigned departments; cannot write assets.
 -- no-role user: cannot read the canonical asset register.
 -- no user can mutate department_memberships unless admin/biomedical.
+
+
+-- RLS helper functions are callable only by signed-in users. These functions
+-- answer questions about the caller's own role/membership and never accept a user ID.
+revoke all on function public.is_department_member(uuid) from public, anon;
+revoke all on function public.is_department_asset_officer(uuid) from public, anon;
+revoke all on function public.can_view_department(uuid) from public, anon;
+grant execute on function public.is_department_member(uuid) to authenticated;
+grant execute on function public.is_department_asset_officer(uuid) to authenticated;
+grant execute on function public.can_view_department(uuid) to authenticated;
+
+-- Central module directory and generator data are visible only to central roles.
+drop policy if exists "Authenticated users read hospital locations" on public.hospital_locations;
+create policy "Hospital roles read hospital locations" on public.hospital_locations
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer','department_officer','maintenance']));
+
+drop policy if exists "Authenticated users read generators" on public.generators;
+create policy "Central roles read generators" on public.generators
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer']));
+
+drop policy if exists "Authenticated users read generator fuel logs" on public.generator_fuel_logs;
+create policy "Central roles read generator fuel logs" on public.generator_fuel_logs
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer']));
+
+drop policy if exists "Authenticated users read generator maintenance" on public.generator_maintenance;
+create policy "Central roles read generator maintenance" on public.generator_maintenance
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer']));
+
+drop policy if exists "Authenticated users read generator faults" on public.generator_faults;
+create policy "Central roles read generator faults" on public.generator_faults
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer']));
