@@ -211,6 +211,7 @@ function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');cl
 let S={devices:[],faults:[],services:[],audits:[],locations:[],generators:[],generatorFuelLogs:[],generatorMaintenance:[],generatorFaults:[]};
 let session=null,loaded=false,loading=false,lastSig='',dataChanged=false;
 let appRole=null,modulesReady=false,modulesError='';
+let assetRegister={rows:[],total:0,page:0,pageSize:25,search:'',status:'all',department:'all',category:'all',departments:[],categories:[],ready:false,loading:false,error:''};
 const canManageHospital=()=>appRole==='admin'||appRole==='biomedical';
 const canAdminHospital=()=>appRole==='admin';
 const dev=id=>S.devices.find(d=>d.id===id);
@@ -397,6 +398,64 @@ function qrSvg(id){
   catch(e){return '<div class="small">QR could not be drawn. Use the ID '+esc(id)+'.</div>';}
 }
 
+
+/* ---------- canonical hospital asset register (read-only, paginated) ---------- */
+async function fetchAssetRegister(){
+  if(assetRegister.loading||!session)return;
+  assetRegister.loading=true;assetRegister.error='';
+  try{
+    const [departments,categories]=await Promise.all([
+      sb.from('departments').select('id,name').eq('active',true).order('name'),
+      sb.from('asset_categories').select('id,name').eq('active',true).order('name')
+    ]);
+    let q=sb.from('assets').select('id,asset_code,name,asset_kind,manufacturer,model,serial_number,department_id,category_id,operational_status,physical_condition,critical,updated_at',{count:'exact'}).order('asset_code').range(assetRegister.page*assetRegister.pageSize,(assetRegister.page+1)*assetRegister.pageSize-1);
+    if(assetRegister.search){
+      const term=assetRegister.search.replace(/[^A-Za-z0-9 _.-]/g,'').trim();
+      if(term)q=q.or(['name','asset_code','model','serial_number'].map(k=>k+'.ilike.%'+term+'%').join(','));
+    }
+    if(assetRegister.status!=='all')q=q.eq('operational_status',assetRegister.status);
+    if(assetRegister.department!=='all')q=q.eq('department_id',assetRegister.department);
+    if(assetRegister.category!=='all')q=q.eq('category_id',assetRegister.category);
+    const a=await q;
+    if(a.error)throw a.error;
+    if(departments.error)throw departments.error;
+    if(categories.error)throw categories.error;
+    assetRegister.rows=a.data||[];
+    assetRegister.total=a.count||0;
+    assetRegister.departments=departments.data||[];
+    assetRegister.categories=categories.data||[];
+    assetRegister.ready=true;
+  }catch(e){
+    assetRegister.error=e&&e.message?e.message:'The canonical asset register could not be loaded.';
+    assetRegister.ready=false;
+  }finally{
+    assetRegister.loading=false;
+    if(location.hash.indexOf('#/assets')===0)render();
+  }
+}
+function viewAssets(){
+  if(!assetRegister.ready&&!assetRegister.loading){
+    fetchAssetRegister();
+    return '<h1>Hospital asset register</h1><p class="sub">Loading one page of canonical asset records...</p>';
+  }
+  if(assetRegister.loading)return '<h1>Hospital asset register</h1><p class="sub">Loading...</p>';
+  if(assetRegister.error)return '<div class="top"><a class="back" href="#/more">‹ Account</a></div><h1>Hospital asset register</h1><div class="fault"><b>Register unavailable</b><p>'+esc(assetRegister.error)+'</p><p class="small">This register requires the Batch 1 database foundation to be installed and verified on staging. The existing equipment register remains separate and unchanged.</p><button class="btn" data-act="assetRetry">Try again</button></div>';
+  const start=assetRegister.total?assetRegister.page*assetRegister.pageSize+1:0;
+  const end=Math.min(assetRegister.total,(assetRegister.page+1)*assetRegister.pageSize);
+  const dmap=Object.fromEntries(assetRegister.departments.map(x=>[x.id,x.name]));
+  const cmap=Object.fromEntries(assetRegister.categories.map(x=>[x.id,x.name]));
+  let h='<div class="top"><a class="back" href="#/more">‹ Account</a></div><h1>Hospital asset register</h1><p class="sub">Canonical hospital-wide register · '+assetRegister.total.toLocaleString('en-NG')+' records</p>';
+  h+='<div class="actions"><input class="search" id="assetSearch" type="search" placeholder="Search name, asset code, model or serial" value="'+esc(assetRegister.search)+'" aria-label="Search assets"><button class="btn primary" data-act="assetSearch">Search</button></div>';
+  h+='<div class="two"><label class="f">Status<select id="assetStatus">'+[['all','All statuses'],['unknown','Unknown'],['in_service','In service'],['under_maintenance','Under maintenance'],['out_of_service','Out of service'],['in_storage','In storage'],['retired','Retired'],['missing','Missing']].map(x=>'<option value="'+x[0]+'"'+(assetRegister.status===x[0]?' selected':'')+'>'+x[1]+'</option>').join('')+'</select></label>';
+  h+='<label class="f">Department<select id="assetDepartment"><option value="all">All departments</option>'+assetRegister.departments.map(x=>'<option value="'+esc(x.id)+'"'+(assetRegister.department===x.id?' selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select></label></div>';
+  h+='<label class="f">Category<select id="assetCategory"><option value="all">All categories</option>'+assetRegister.categories.map(x=>'<option value="'+esc(x.id)+'"'+(assetRegister.category===x.id?' selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select></label>';
+  h+='<div class="list">';
+  h+=assetRegister.rows.length?assetRegister.rows.map(x=>'<div class="tag"><div class="t"><div><div class="n">'+esc(x.name)+(x.critical?' <span class="pill bad">Critical</span>':'')+'</div><div class="m">'+esc(x.asset_code)+' · '+esc(dmap[x.department_id]||'Department not assigned')+'</div></div><span class="pill">'+esc(String(x.operational_status||'unknown').replaceAll('_',' '))+'</span></div><div class="m">'+esc(cmap[x.category_id]||x.asset_kind||'Uncategorised')+(x.model?' · '+esc(x.model):'')+(x.serial_number?' · S/N '+esc(x.serial_number):'')+'</div>'+(x.physical_condition?'<div class="m">Condition: '+esc(x.physical_condition)+'</div>':'')+'</div>').join(''):'<div class="empty">No assets match these filters.</div>';
+  h+='</div><div class="top" style="margin-top:16px"><span class="small muted">Showing '+start+'–'+end+' of '+assetRegister.total+'</span><div class="btnrow"><button class="btn" data-act="assetPrev"'+(assetRegister.page===0?' disabled':'')+'>Previous</button><button class="btn" data-act="assetNext"'+(end>=assetRegister.total?' disabled':'')+'>Next</button></div></div>';
+  h+='<label class="f">Rows per page<select id="assetPageSize">'+[25,50,100].map(n=>'<option value="'+n+'"'+(assetRegister.pageSize===n?' selected':'')+'>'+n+'</option>').join('')+'</select></label>';
+  return h;
+}
+
 /* ---------- engineer views ---------- */
 function devRow(d,extra){
   const s=state(d),of=openFault(d);
@@ -545,6 +604,7 @@ function viewMore(){
   '<div class="list">'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Monthly report</div><div class="m">Uptime, faults, costs and overdue servicing, ready to print for management.</div><div class="btnrow"><a class="btn primary" href="#/report">Open monthly report</a></div></div>'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Wards & departments</div><div class="m">Register and manage the hospital locations used when assigning equipment.</div><div class="btnrow"><a class="btn primary" href="#/locations">Open locations</a></div></div>'+
+  '<div class="tag" style="--c:var(--brand)"><div class="n">Hospital-wide asset register</div><div class="m">Browse the canonical register with database-side search, filters and pagination.</div><div class="btnrow"><a class="btn primary" href="#/assets">Open asset register</a></div></div>'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Generators</div><div class="m">Separate generator records, refuelling, servicing and breakdown history.</div><div class="btnrow"><a class="btn primary" href="#/generators">Open generators</a></div></div>'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Ward audit</div><div class="m">Walk a ward, scan every device, and see what is missing or in the wrong place.</div><div class="btnrow"><a class="btn primary" href="#/audit">'+(audit?'Continue audit':'Start an audit')+'</a></div></div>'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Handover pack</div><div class="m">One Excel file with every device, fault, service and audit, for the next engineer or your records.</div><div class="btnrow"><button class="btn" data-act="handover">Download handover pack</button></div></div>'+
@@ -969,6 +1029,7 @@ function render(){
   let h,nav='today';
   switch(p[0]){
     case 'devices':nav='devices';h=viewDevices(q);break;
+    case 'assets':nav='more';h=viewAssets();break;
     case 'd':nav='devices';h=viewDevice(decodeURIComponent(p[1]||''),q);break;
     case 'label':nav='devices';h=viewLabel(decodeURIComponent(p[1]||''));break;
     case 'labels':nav='devices';h=viewLabels();break;
@@ -988,6 +1049,8 @@ function render(){
   const imf=$('#impFile');if(imf)imf.addEventListener('change',e=>{const f=e.target.files[0];if(f)readImportFile(f);});
   const rm=$('#rm');if(rm)rm.addEventListener('change',e=>{if(e.target.value){reportMonth=e.target.value;render();}});
   const qEl=$('#q');if(qEl)qEl.addEventListener('input',e=>{devQuery=e.target.value;const pos=e.target.selectionStart;render();const n=$('#q');if(n){n.focus();n.setSelectionRange(pos,pos);}});
+  const assetStatus=$('#assetStatus'),assetDepartment=$('#assetDepartment'),assetCategory=$('#assetCategory'),assetPageSize=$('#assetPageSize');
+  [assetStatus,assetDepartment,assetCategory,assetPageSize].forEach(el=>{if(el)el.addEventListener('change',()=>{if(el===assetStatus)assetRegister.status=el.value;else if(el===assetDepartment)assetRegister.department=el.value;else if(el===assetCategory)assetRegister.category=el.value;else assetRegister.pageSize=Number(el.value);assetRegister.page=0;assetRegister.ready=false;render();});});
 }
 function bindLogin(){
   const f=$('#loginForm');if(!f)return;
@@ -1019,6 +1082,10 @@ document.addEventListener('click',async e=>{
     case 'updateGeneratorFault':{const f=S.generatorFaults.find(x=>x.id===id);if(f)generatorFaultUpdateForm(f);break;}
     case 'filter':devFilter=t.dataset.v;render();break;
     case 'refresh':if(await loadAll()){render();toast('Up to date');}break;
+    case 'assetRetry':assetRegister.ready=false;assetRegister.error='';render();break;
+    case 'assetSearch':assetRegister.search=$('#assetSearch').value.trim();assetRegister.page=0;assetRegister.ready=false;render();break;
+    case 'assetPrev':assetRegister.page=Math.max(0,assetRegister.page-1);assetRegister.ready=false;render();break;
+    case 'assetNext':assetRegister.page++;assetRegister.ready=false;render();break;
     case 'edit':deviceForm(dev(id));break;
     case 'report':faultForm(dev(id));break;
     case 'service':serviceForm(dev(id));break;
