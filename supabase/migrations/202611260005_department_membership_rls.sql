@@ -58,6 +58,23 @@ as $$
   )
 $$;
 
+create or replace function public.is_department_asset_officer(p_department_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $
+  select exists (
+    select 1
+    from public.department_memberships m
+    where m.user_id = auth.uid()
+      and m.department_id = p_department_id
+      and m.membership_role = 'asset_officer'
+      and m.active = true
+  )
+$;
+
 create or replace function public.can_view_department(p_department_id uuid)
 returns boolean
 language sql
@@ -83,7 +100,7 @@ create policy assets_department_officer_insert on public.assets
   for insert to authenticated
   with check (
     public.has_app_role(array['department_officer'])
-    and public.is_department_member(department_id)
+    and public.is_department_asset_officer(department_id)
   );
 
 drop policy if exists assets_department_officer_update on public.assets;
@@ -119,7 +136,7 @@ create policy asset_documents_department_officer_insert on public.asset_document
     and exists (
       select 1 from public.assets a
       where a.id = asset_documents.asset_id
-        and public.is_department_member(a.department_id)
+        and public.is_department_asset_officer(a.department_id)
     )
   );
 
