@@ -451,17 +451,79 @@ function viewAssets(){
   const end=Math.min(assetRegister.total,(assetRegister.page+1)*assetRegister.pageSize);
   const dmap=Object.fromEntries(assetRegister.departments.map(x=>[x.id,x.name]));
   const cmap=Object.fromEntries(assetRegister.categories.map(x=>[x.id,x.name]));
-  let h='<div class="top"><a class="back" href="#/more">‹ Account</a></div><h1>Hospital asset register</h1><p class="sub">Canonical hospital-wide register · '+assetRegister.total.toLocaleString('en-NG')+' records</p>';
+  let h='<div class="top"><a class="back" href="#/more">‹ Account</a>'+(canManageHospital()?'<button class="btn primary" data-act="addAsset">Register asset</button>':'')+'</div><h1>Hospital asset register</h1><p class="sub">Canonical hospital-wide register · '+assetRegister.total.toLocaleString('en-NG')+' records</p>';
   h+='<div class="actions"><input class="search" id="assetSearch" type="search" placeholder="Search name, asset code, model or serial" value="'+esc(assetRegister.search)+'" aria-label="Search assets"><button class="btn primary" data-act="assetSearch">Search</button></div>';
   h+='<div class="two"><label class="f">Status<select id="assetStatus">'+[['all','All statuses'],['unknown','Unknown'],['in_service','In service'],['under_maintenance','Under maintenance'],['out_of_service','Out of service'],['in_storage','In storage'],['retired','Retired'],['missing','Missing']].map(x=>'<option value="'+x[0]+'"'+(assetRegister.status===x[0]?' selected':'')+'>'+x[1]+'</option>').join('')+'</select></label>';
   h+='<label class="f">Department<select id="assetDepartment"><option value="all">All departments</option>'+assetRegister.departments.map(x=>'<option value="'+esc(x.id)+'"'+(assetRegister.department===x.id?' selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select></label></div>';
   h+='<label class="f">Category<select id="assetCategory"><option value="all">All categories</option>'+assetRegister.categories.map(x=>'<option value="'+esc(x.id)+'"'+(assetRegister.category===x.id?' selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select></label>';
   h+='<div class="list">';
-  h+=assetRegister.rows.length?assetRegister.rows.map(x=>'<div class="tag"><div class="t"><div><div class="n">'+esc(x.name)+(x.critical?' <span class="pill bad">Critical</span>':'')+'</div><div class="m">'+esc(x.asset_code)+' · '+esc(dmap[x.department_id]||'Department not assigned')+'</div></div><span class="pill">'+esc(String(x.operational_status||'unknown').replaceAll('_',' '))+'</span></div><div class="m">'+esc(cmap[x.category_id]||x.asset_kind||'Uncategorised')+(x.model?' · '+esc(x.model):'')+(x.serial_number?' · S/N '+esc(x.serial_number):'')+'</div>'+(x.physical_condition?'<div class="m">Condition: '+esc(x.physical_condition)+'</div>':'')+'</div>').join(''):'<div class="empty">No assets match these filters.</div>';
+  h+=assetRegister.rows.length?assetRegister.rows.map(x=>'<div class="tag"><div class="t"><div><div class="n">'+esc(x.name)+(x.critical?' <span class="pill bad">Critical</span>':'')+'</div><div class="m">'+esc(x.asset_code)+' · '+esc(dmap[x.department_id]||'Department not assigned')+'</div></div><span class="pill">'+esc(String(x.operational_status||'unknown').replaceAll('_',' '))+'</span></div><div class="m">'+esc(cmap[x.category_id]||x.asset_kind||'Uncategorised')+(x.model?' · '+esc(x.model):'')+(x.serial_number?' · S/N '+esc(x.serial_number):'')+'</div>'+(x.physical_condition?'<div class="m">Condition: '+esc(x.physical_condition)+'</div>':'')+(canManageHospital()?'<div class="btnrow"><button class="btn" data-act="editAsset" data-id="'+esc(x.id)+'">Edit asset record</button></div>':'')+'</div>').join(''):'<div class="empty">No assets match these filters.</div>';
   h+='</div><div class="top" style="margin-top:16px"><span class="small muted">Showing '+start+'–'+end+' of '+assetRegister.total+'</span><div class="btnrow"><button class="btn" data-act="assetPrev"'+(assetRegister.page===0?' disabled':'')+'>Previous</button><button class="btn" data-act="assetNext"'+(end>=assetRegister.total?' disabled':'')+'>Next</button></div></div>';
   h+='<label class="f">Rows per page<select id="assetPageSize">'+[25,50,100].map(n=>'<option value="'+n+'"'+(assetRegister.pageSize===n?' selected':'')+'>'+n+'</option>').join('')+'</select></label>';
   return h;
 }
+
+/* ---------- canonical asset registration and editing ---------- */
+async function assetForm(asset){
+  if(!canManageHospital()){toast('Your role cannot register or edit hospital assets');return;}
+  let current=asset||null;
+  if(current){
+    const detail=await sb.from('assets').select('*').eq('id',current.id).single();
+    if(detail.error){toast('Could not load this asset: '+detail.error.message);return;}
+    current=detail.data;
+  }
+  const [hospital,departments,categories,locations]=await Promise.all([
+    sb.from('hospitals').select('id').eq('slug','central-hospital').single(),
+    sb.from('departments').select('id,name').eq('active',true).order('name'),
+    sb.from('asset_categories').select('id,name').eq('active',true).order('name'),
+    sb.from('locations').select('id,name,department_id').eq('active',true).order('name')
+  ]);
+  const failed=[hospital,departments,categories,locations].find(x=>x.error);
+  if(failed){toast('Asset form could not load its hospital directories: '+failed.error.message);return;}
+  const deptOptions=departments.data.map(x=>[x.id,x.name]);
+  const categoryOptions=[['','Uncategorised'],...categories.data.map(x=>[x.id,x.name])];
+  const locationOptions=[['','No room / physical location'],...locations.data.map(x=>[x.id,x.name])];
+  const select=(label,name,options,value)=>field(label,name,{options:[...options],value:value||''});
+  sheet(current?'Edit hospital asset':'Register hospital asset',
+    (current?'<div class="note"><b>Asset code:</b> '+esc(current.asset_code)+' · This identifier cannot be changed.</div>':'<div class="note">A unique Central Hospital asset code will be generated automatically when the database code-generation migration is installed.</div>')+
+    field('Asset name','name',{required:true,value:current?.name,placeholder:'e.g. Mindray patient monitor'})+
+    '<div class="two">'+select('Department / ward','department_id',deptOptions,current?.department_id)+select('Asset category','category_id',categoryOptions,current?.category_id)+'</div>'+
+    select('Physical location / room','location_id',locationOptions,current?.location_id)+
+    '<div class="two">'+select('Asset type','asset_kind',[['equipment','Equipment'],['accessory','Accessory'],['furniture','Furniture'],['ict','ICT'],['infrastructure','Infrastructure'],['other','Other']],current?.asset_kind||'equipment')+
+    select('Operational status','operational_status',[['in_service','In service'],['under_maintenance','Under maintenance'],['out_of_service','Out of service'],['in_storage','In storage'],['retired','Retired'],['missing','Missing']],current?.operational_status||'in_service')+'</div>'+
+    '<div class="two">'+field('Manufacturer','manufacturer',{value:current?.manufacturer})+field('Model','model',{value:current?.model})+'</div>'+
+    '<div class="two">'+field('Serial number','serial_number',{value:current?.serial_number})+field('Acquisition date','acquisition_date',{type:'date',value:current?.acquisition_date})+'</div>'+
+    '<div class="two">'+field('Purchase cost (₦)','purchase_cost',{type:'number',value:current?.purchase_cost})+field('Replacement cost (₦)','replacement_cost',{type:'number',value:current?.replacement_cost})+'</div>'+
+    '<div class="two">'+field('Warranty expiry','warranty_until',{type:'date',value:current?.warranty_until})+field('Vendor / supplier','vendor',{value:current?.vendor})+'</div>'+
+    field('Vendor phone','vendor_phone',{value:current?.vendor_phone})+
+    '<div class="two">'+select('Physical condition','physical_condition',[['unknown','Unknown'],['excellent','Excellent'],['good','Good'],['fair','Fair'],['poor','Poor'],['unserviceable','Unserviceable']],current?.physical_condition||'unknown')+
+    select('Critical asset?','critical',[['false','No'],['true','Yes']],String(!!current?.critical))+'</div>'+
+    field('Notes','notes',{area:true,value:current?.notes||'',placeholder:'Record identifying details, accessories or verification notes.'}),
+    async fd=>{
+      if(!fd.name.trim()||!fd.department_id){toast('Asset name and department are required');return;}
+      const locationId=fd.location_id||null;
+      if(locationId){
+        const selected=locations.data.find(x=>x.id===locationId);
+        if(!selected||selected.department_id!==fd.department_id){toast('Choose a physical location within the selected department');return;}
+      }
+      const row={
+        name:fd.name.trim(),department_id:fd.department_id,category_id:fd.category_id||null,
+        location_id:locationId,asset_kind:fd.asset_kind,operational_status:fd.operational_status,
+        manufacturer:fd.manufacturer||null,model:fd.model||null,serial_number:fd.serial_number||null,
+        acquisition_date:fd.acquisition_date||null,purchase_cost:numOrNull(fd.purchase_cost),
+        replacement_cost:numOrNull(fd.replacement_cost),warranty_until:fd.warranty_until||null,
+        vendor:fd.vendor||null,vendor_phone:fd.vendor_phone||null,
+        physical_condition:fd.physical_condition,critical:fd.critical==='true',notes:fd.notes||null
+      };
+      const q=current
+        ?sb.from('assets').update(row).eq('id',current.id)
+        :sb.from('assets').insert({...row,hospital_id:hospital.data.id,created_by:session.user.id});
+      if(await run(q,current?'Asset updated':'Asset registered')){
+        closeSheet();assetRegister.ready=false;assetRegister.page=0;render();
+      }
+    });
+}
+
 
 /* ---------- engineer views ---------- */
 function devRow(d,extra){
@@ -1090,6 +1152,8 @@ document.addEventListener('click',async e=>{
     case 'filter':devFilter=t.dataset.v;render();break;
     case 'refresh':if(await loadAll()){render();toast('Up to date');}break;
     case 'assetRetry':assetRegister.ready=false;assetRegister.error='';render();break;
+    case 'addAsset':assetForm();break;
+    case 'editAsset':{const row=assetRegister.rows.find(x=>x.id===id);if(row)assetForm(row);break;}
     case 'assetSearch':assetRegister.search=$('#assetSearch').value.trim();assetRegister.page=0;assetRegister.ready=false;render();break;
     case 'assetPrev':assetRegister.page=Math.max(0,assetRegister.page-1);assetRegister.ready=false;render();break;
     case 'assetNext':assetRegister.page++;assetRegister.ready=false;render();break;
