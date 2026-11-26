@@ -26,7 +26,8 @@
 6. Apply `supabase/migrations/202611260004_asset_audit_triggers.sql` to staging. Verify create/update/transfer audit events and transaction rollback behaviour.
 7. Apply `supabase/migrations/202611260005_department_membership_rls.sql` to staging. Test role and department access using separate test accounts.
 8. Apply `supabase/migrations/202611260006_asset_code_generation.sql` to staging. Test simultaneous inserts and verify no duplicate codes.
-9. Only after the staging checks pass, the hospital's authorised administrator may decide whether to schedule a production migration. Production execution requires a fresh backup and explicit approval.
+9. Apply `supabase/migrations/202611260007_link_legacy_history.sql` to staging. Verify legacy fault/service counts and canonical asset links.
+10. Only after the staging checks pass, the hospital's authorised administrator may decide whether to schedule a production migration. Production execution requires a fresh backup and explicit approval.
 
 The repository does not contain a Supabase service-role key, and the application must never receive one. The first administrator must be designated by the hospital and assigned using the Auth UUID from Supabase Authentication → Users. Do not share credentials or use a shared staff account.
 
@@ -136,6 +137,7 @@ References:
 - [ ] Confirm viewer accounts can read but cannot write to the new modules.
 - [ ] Verify migration 005 department-scoped read/write policies with separate admin, Biomedical, viewer, department-officer and maintenance test accounts.
 - [ ] Verify migration 006 generates unique asset codes under concurrent inserts while preserving all pre-existing codes.
+- [ ] Verify migration 007 links existing fault/service rows without changing legacy IDs or duplicating history.
 - [ ] Confirm unauthorised accounts cannot read or write the new modules.
 - [ ] Confirm all eight locations appear exactly once.
 - [ ] Register both generators from their physical nameplates; do not copy unverified reference values into the actual records.
