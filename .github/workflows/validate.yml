@@ -1,0 +1,50 @@
+name: Validate application source
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, feature/central-hospital-wards-generators]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Extract inline application script
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          html = Path("index.html").read_text(encoding="utf-8")
+          scripts = re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", html, re.I | re.S)
+          if not scripts:
+              raise SystemExit("No inline application script found")
+          Path("/tmp/equipment-tracker-app.js").write_text(scripts[-1], encoding="utf-8")
+          print(f"Extracted inline script ({len(scripts[-1])} characters)")
+          PY
+      - name: Validate JavaScript syntax
+        run: node --check /tmp/equipment-tracker-app.js
+      - name: Check migrations for destructive table operations
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          files = sorted(Path("supabase/migrations").glob("*.sql"))
+          if not files:
+              raise SystemExit("No SQL migrations found")
+          forbidden = re.compile(r"\b(drop\s+table|truncate\s+(?:table\s+)?|delete\s+from)\b", re.I)
+          failures = []
+          for path in files:
+              sql = path.read_text(encoding="utf-8")
+              if forbidden.search(sql):
+                  failures.append(str(path))
+          if failures:
+              raise SystemExit("Review potentially destructive SQL in: " + ", ".join(failures))
+          print(f"Reviewed {len(files)} migration files; no DROP TABLE, TRUNCATE or DELETE FROM statements found.")
+          PY
