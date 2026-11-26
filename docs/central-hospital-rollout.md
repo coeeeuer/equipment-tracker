@@ -16,19 +16,20 @@
 
 ## Important: database migration required
 
-The new screens are deliberately fail-soft: if the migration has not been applied, existing equipment tracking should continue to load, while the new hospital modules display a migration/role notice. The new screens cannot save records until the SQL migration has been applied in the Supabase project.
+**Do not run these migrations against production yet.** The original schema for the legacy `devices`, `faults`, `services` and `audits` tables has not been independently verified. Apply the sequence below only to a restored staging copy first.
 
-1. Take a current Supabase database backup.
-2. Open Supabase Dashboard → SQL Editor.
-3. Review and run `supabase/migrations/202611260001_central_hospital_modules.sql`.
-4. Review and run `supabase/migrations/202611260002_hospital_asset_foundation.sql` on the restored staging copy only. Verify the legacy-device backfill and department mappings before proceeding.
-5. Review and run `supabase/migrations/202611260003_link_generators_to_assets.sql` on staging. Confirm every generator profile links to exactly one canonical asset.
-6. In Supabase Authentication → Users, identify the account that Central Hospital has designated as the first application administrator.
-7. Copy that user's Auth UUID and run the bootstrap statement at the bottom of the migration, replacing the placeholder UUID.
-8. Assign biomedical staff and read-only users by inserting their Auth UUIDs into `public.app_user_roles`, with role `biomedical` or `viewer`.
-9. Sign out and back in to refresh the app role, then verify access using one account per role.
+1. Take a current Supabase backup and prove it can be restored to an isolated staging project.
+2. Review the actual legacy table definitions, foreign keys, triggers, indexes and RLS policies against the assumptions in `docs/batch-2-compatibility-review.md`.
+3. Apply `supabase/migrations/202611260001_central_hospital_modules.sql` to staging.
+4. Apply `supabase/migrations/202611260002_hospital_asset_foundation.sql` to staging. Compare legacy device counts with copied asset counts and resolve every unmapped department before proceeding.
+5. Apply `supabase/migrations/202611260003_link_generators_to_assets.sql` to staging. Confirm every generator profile links to exactly one canonical asset.
+6. Apply `supabase/migrations/202611260004_asset_audit_triggers.sql` to staging. Verify create/update/transfer audit events and transaction rollback behaviour.
+7. Apply `supabase/migrations/202611260005_department_membership_rls.sql` to staging. Test role and department access using separate test accounts.
+8. Only after the staging checks pass, the hospital's authorised administrator may decide whether to schedule a production migration. Production execution requires a fresh backup and explicit approval.
 
-Example role assignment (replace the UUID with the real Auth user UUID):
+The repository does not contain a Supabase service-role key, and the application must never receive one. The first administrator must be designated by the hospital and assigned using the Auth UUID from Supabase Authentication → Users. Do not share credentials or use a shared staff account.
+
+Example central Biomedical role assignment (replace the UUID with the real Auth user UUID):
 
 ```sql
 insert into public.app_user_roles (user_id, role)
@@ -37,7 +38,7 @@ on conflict (user_id) do update
 set role = excluded.role, updated_at = now();
 ```
 
-The repository does not contain a Supabase service-role key, and the application must never receive one. Role assignment is therefore an administrator-controlled Supabase operation for this first release; no staff can promote themselves from inside the app.
+Department memberships should be created only by admin/Biomedical after the user and department have been verified. The department membership migration is a database foundation; the app does not yet provide a staff membership administration screen.
 
 ## Role behaviour for the new modules
 
@@ -48,7 +49,7 @@ The repository does not contain a Supabase service-role key, and the application
 | viewer | Yes | No | No | No |
 | no role | No module access | No | No | No |
 
-The existing equipment module has its pre-existing permissions and policies; these migrations do not silently change them. The department-aware asset permissions and full user-to-department assignment workflow are not yet implemented. Before hospital-wide production use, an administrator should review the existing RLS policies for `devices`, `faults`, `services`, `audits` and the public QR-report RPC. The new role model does not automatically retrofit security onto those existing tables.
+The existing equipment module has its pre-existing permissions and policies; these migrations do not silently change them. Migration 005 scopes access to canonical assets, but the legacy equipment permissions remain a separate review item. The current canonical asset register UI is read-only; department-officer create/edit screens and membership administration are not yet implemented. Before hospital-wide production use, an administrator should review the existing RLS policies for `devices`, `faults`, `services`, `audits` and the public QR-report RPC. The new role model does not automatically retrofit security onto those existing tables.
 
 ## Initial hospital locations
 
@@ -117,6 +118,7 @@ References:
 - [ ] Verify the paginated canonical register returns accurate counts and page boundaries with a synthetic 10,000-row dataset.
 - [ ] Assign the first admin and at least one biomedical account.
 - [ ] Confirm viewer accounts can read but cannot write to the new modules.
+- [ ] Verify migration 005 department-scoped read/write policies with separate admin, Biomedical, viewer, department-officer and maintenance test accounts.
 - [ ] Confirm unauthorised accounts cannot read or write the new modules.
 - [ ] Confirm all eight locations appear exactly once.
 - [ ] Register both generators from their physical nameplates; do not copy unverified reference values into the actual records.
