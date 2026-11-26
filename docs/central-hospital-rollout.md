@@ -27,7 +27,8 @@
 7. Apply `supabase/migrations/202611260005_department_membership_rls.sql` to staging. Test role and department access using separate test accounts.
 8. Apply `supabase/migrations/202611260006_asset_code_generation.sql` to staging. Test simultaneous inserts and verify no duplicate codes.
 9. Apply `supabase/migrations/202611260007_link_legacy_history.sql` to staging. Verify legacy fault/service counts and canonical asset links.
-10. Only after the staging checks pass, the hospital's authorised administrator may decide whether to schedule a production migration. Production execution requires a fresh backup and explicit approval.
+10. Apply `supabase/migrations/202611260008_legacy_rpc_hardening.sql` to staging. Confirm public QR lookup and fault-report RPCs still work, while internal notification/digest functions cannot be called directly through the Data API.
+11. Only after the staging checks pass, the hospital's authorised administrator may decide whether to schedule a production migration. Production execution requires a fresh backup and explicit approval.
 
 The repository does not contain a Supabase service-role key, and the application must never receive one. The first administrator must be designated by the hospital and assigned using the Auth UUID from Supabase Authentication → Users. Do not share credentials or use a shared staff account.
 
@@ -131,7 +132,7 @@ References:
 
 ## Validation checklist before enabling hospital-wide use
 
-- [ ] Apply migrations 001–007 to a restored staging copy first; do not apply directly to production.
+- [ ] Apply migrations 001–008 to a restored staging copy first; do not apply directly to production.
 - [ ] Verify the paginated canonical register returns accurate counts and page boundaries with a synthetic 10,000-row dataset.
 - [ ] Assign the first admin and at least one biomedical account.
 - [ ] Confirm viewer accounts can read but cannot write to the new modules.
@@ -149,8 +150,9 @@ References:
 - [ ] Transfer a test device and confirm its old QR label displays a stale-location warning; print and test the replacement label.
 - [ ] Verify old QR labels still open the existing public fault-report route.
 - [ ] Verify installed PWA clients refresh to the new service-worker cache.
-- [ ] Review existing-table RLS policies before production rollout.
+- [ ] Review existing-table RLS policies before production rollout. The current legacy `devices`, `faults`, `services` and `audits` policies still grant broad access to authenticated users; do not onboard department-specific accounts until these are replaced and tested.
+- [ ] Confirm the public `get_device_public` and `report_fault` RPCs remain available for QR labels; internal `notify_new_fault` and `send_daily_digest` functions must not be directly callable by anon/authenticated clients.
 
 ## Current limitations
 
-This branch changes the repository only. It does not apply the Supabase migration, create user accounts, assign staff roles, or deploy the live site. Those are separate controlled rollout steps. Browser-level end-to-end tests against the hospital's actual Supabase project have not been run from this environment.
+This branch changes the repository only. It does not apply the Supabase migrations, create user accounts, assign staff roles, or deploy the live site. A syntax/compatibility dry-run of migrations 001–007 was executed against the existing project inside a transaction and rolled back successfully; no hospital tables or policies were installed by that test. This is not a substitute for a restored staging project and role-based end-to-end testing. Browser-level end-to-end tests against the hospital's actual Supabase project have not been run from this environment.

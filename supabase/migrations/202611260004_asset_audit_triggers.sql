@@ -94,6 +94,10 @@ for each row execute function public.audit_asset_transfer();
 -- Authenticated users may read audit rows only if they hold the central oversight role.
 -- No authenticated update/delete policy is created for audit rows.
 
+-- Trigger functions are internal implementation details, not callable RPC endpoints.
+revoke all on function public.audit_canonical_asset_change() from public, anon, authenticated;
+revoke all on function public.audit_asset_transfer() from public, anon, authenticated;
+revoke all on function public.set_asset_updated_at() from public, anon, authenticated;
 commit;
 
 -- Staging verification:

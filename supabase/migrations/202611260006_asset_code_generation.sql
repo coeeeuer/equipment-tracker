@@ -70,6 +70,8 @@ create trigger assets_assign_asset_code
 before insert on public.assets
 for each row execute function public.assign_asset_code();
 
+-- The code allocator is trigger-only; never expose it as an RPC function.
+revoke all on function public.assign_asset_code() from public, anon, authenticated;
 commit;
 
 -- Staging verification:

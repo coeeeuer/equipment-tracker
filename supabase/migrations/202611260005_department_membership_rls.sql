@@ -64,7 +64,7 @@ language sql
 stable
 security definer
 set search_path = ''
-as $
+as $$
   select exists (
     select 1
     from public.department_memberships m
@@ -73,7 +73,7 @@ as $
       and m.membership_role = 'asset_officer'
       and m.active = true
   )
-$;
+$$;
 
 create or replace function public.can_view_department(p_department_id uuid)
 returns boolean
@@ -108,11 +108,11 @@ create policy assets_department_officer_update on public.assets
   for update to authenticated
   using (
     public.has_app_role(array['department_officer'])
-    and public.is_department_member(department_id)
+    and public.is_department_asset_officer(department_id)
   )
   with check (
     public.has_app_role(array['department_officer'])
-    and public.is_department_member(department_id)
+    and public.is_department_asset_officer(department_id)
   );
 
 -- Documents follow the access rights of their parent asset.
@@ -148,7 +148,7 @@ create policy asset_documents_department_officer_update on public.asset_document
     and exists (
       select 1 from public.assets a
       where a.id = asset_documents.asset_id
-        and public.is_department_member(a.department_id)
+        and public.is_department_asset_officer(a.department_id)
     )
   )
   with check (
@@ -156,7 +156,7 @@ create policy asset_documents_department_officer_update on public.asset_document
     and exists (
       select 1 from public.assets a
       where a.id = asset_documents.asset_id
-        and public.is_department_member(a.department_id)
+        and public.is_department_asset_officer(a.department_id)
     )
   );
 
@@ -191,7 +191,7 @@ create or replace function public.enforce_asset_location_department()
 returns trigger
 language plpgsql
 set search_path = ''
-as $
+as $$
 declare
   v_location_department uuid;
 begin
@@ -210,7 +210,7 @@ begin
   end if;
   return new;
 end;
-$;
+$$;
 
 drop trigger if exists assets_validate_location_department on public.assets;
 create trigger assets_validate_location_department
@@ -219,11 +219,62 @@ for each row execute function public.enforce_asset_location_department();
 
 -- A maintenance user may see the assets in their assigned departments but cannot
 -- edit the canonical identity, ownership, department or audit records.
-commit;
-
 -- Staging permission tests:
 -- admin/biomedical/viewer: can read all hospital assets.
 -- department_officer: can read and create/update only assets in active assigned departments.
 -- maintenance: can read only assets in active assigned departments; cannot write assets.
 -- no-role user: cannot read the canonical asset register.
 -- no user can mutate department_memberships unless admin/biomedical.
+
+
+-- RLS helper functions are callable only by signed-in users. These functions
+-- answer questions about the caller's own role/membership and never accept a user ID.
+revoke all on function public.is_department_member(uuid) from public, anon;
+revoke all on function public.is_department_asset_officer(uuid) from public, anon;
+revoke all on function public.can_view_department(uuid) from public, anon;
+grant execute on function public.is_department_member(uuid) to authenticated;
+grant execute on function public.is_department_asset_officer(uuid) to authenticated;
+grant execute on function public.can_view_department(uuid) to authenticated;
+
+-- Central module directory and generator data are visible only to central roles.
+drop policy if exists "Authenticated users read hospital locations" on public.hospital_locations;
+create policy "Hospital roles read hospital locations" on public.hospital_locations
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer','department_officer','maintenance']));
+
+drop policy if exists "Authenticated users read generators" on public.generators;
+create policy "Central roles read generators" on public.generators
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer']));
+
+drop policy if exists "Authenticated users read generator fuel logs" on public.generator_fuel_logs;
+create policy "Central roles read generator fuel logs" on public.generator_fuel_logs
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer']));
+
+drop policy if exists "Authenticated users read generator maintenance" on public.generator_maintenance;
+create policy "Central roles read generator maintenance" on public.generator_maintenance
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer']));
+
+drop policy if exists "Authenticated users read generator faults" on public.generator_faults;
+create policy "Central roles read generator faults" on public.generator_faults
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer']));
+
+
+-- Department directory and category reads require an assigned application role.
+drop policy if exists departments_read_authenticated on public.departments;
+create policy departments_read_roles on public.departments
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer','department_officer','maintenance']));
+drop policy if exists locations_read_authenticated on public.locations;
+create policy locations_read_roles on public.locations
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer','department_officer','maintenance']));
+drop policy if exists asset_categories_read_authenticated on public.asset_categories;
+create policy asset_categories_read_roles on public.asset_categories
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer','department_officer','maintenance']));
+
+commit;
