@@ -208,8 +208,11 @@ let toastTimer;
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2800);}
 
 /* ---------- state ---------- */
-let S={devices:[],faults:[],services:[],audits:[]};
+let S={devices:[],faults:[],services:[],audits:[],locations:[],generators:[],generatorFuelLogs:[],generatorMaintenance:[],generatorFaults:[]};
 let session=null,loaded=false,loading=false,lastSig='',dataChanged=false;
+let appRole=null,modulesReady=false,modulesError='';
+const canManageHospital=()=>appRole==='admin'||appRole==='biomedical';
+const canAdminHospital=()=>appRole==='admin';
 const dev=id=>S.devices.find(d=>d.id===id);
 const openFault=d=>S.faults.find(f=>f.deviceId===d.id&&!f.resolvedAt);
 function lastService(d){let best=d.baseline||d.added;S.services.forEach(s=>{if(s.deviceId===d.id&&s.date>best)best=s.date;});return best;}
@@ -239,18 +242,32 @@ async function loadAll(){
   if(!session||loading)return false;
   loading=true;
   try{
-    const [d,f,s,au]=await Promise.all([
+    const [d,f,s,au,loc,gen,fuel,gm,gf,role]=await Promise.all([
       sb.from('devices').select('*').order('id'),
       sb.from('faults').select('*').order('reported_at',{ascending:false}).limit(5000),
       sb.from('services').select('*').order('service_date',{ascending:false}).limit(5000),
-      sb.from('audits').select('*').order('audit_date',{ascending:false}).limit(100)
+      sb.from('audits').select('*').order('audit_date',{ascending:false}).limit(100),
+      sb.from('hospital_locations').select('*').order('name'),
+      sb.from('generators').select('*').order('asset_code'),
+      sb.from('generator_fuel_logs').select('*').order('refuelled_at',{ascending:false}).limit(2000),
+      sb.from('generator_maintenance').select('*').order('service_date',{ascending:false}).limit(2000),
+      sb.from('generator_faults').select('*').order('reported_at',{ascending:false}).limit(2000),
+      sb.from('app_user_roles').select('role').eq('user_id',session.user.id).maybeSingle()
     ]);
     if(d.error||f.error||s.error){toast('Could not load data. Check your connection.');return false;}
     S.devices=d.data.map(x=>({id:x.id,name:x.name,category:x.category||'',model:x.model||'',serial:x.serial||'',ward:x.ward,ppmDays:x.ppm_days||0,baseline:x.baseline||'',added:x.added,retired:x.retired,critical:!!x.critical,warrantyUntil:x.warranty_until||'',vendor:x.vendor||'',vendorPhone:x.vendor_phone||'',replacementCost:x.replacement_cost==null?'':x.replacement_cost}));
     S.faults=f.data.map(x=>({id:x.id,deviceId:x.device_id,desc:x.descr,priority:x.priority,reporter:x.reporter||'',reportedAt:x.reported_at,stage:x.stage,resolvedAt:x.resolved_at,action:x.action||'',cost:x.cost==null?'':x.cost,photoPath:x.photo_path||'',repairedBy:x.repaired_by||'',hours:x.hours_spent==null?'':x.hours_spent,parts:x.parts_used||''}));
     S.services=s.data.map(x=>({id:x.id,deviceId:x.device_id,type:x.type,date:x.service_date,notes:x.notes||'',by:x.by_name||''}));
     S.audits=au.error?[]:au.data.map(x=>({id:x.id,ward:x.ward,date:x.audit_date,expected:x.expected,found:x.found,missing:x.missing||[],unexpected:x.unexpected||[]}));
-    const sig=JSON.stringify([S.devices,S.faults,S.services,S.audits]);dataChanged=sig!==lastSig;lastSig=sig;
+    modulesReady=!(loc.error||gen.error||fuel.error||gm.error||gf.error||role.error);
+    modulesError=modulesReady?'':(loc.error||gen.error||fuel.error||gm.error||gf.error||role.error||{}).message||'Hospital modules database migration is not installed.';
+    S.locations=loc.error?[]:(loc.data||[]).map(x=>({id:x.id,name:x.name,type:x.location_type,active:x.active,notes:x.notes||''}));
+    S.generators=gen.error?[]:(gen.data||[]).map(x=>({id:x.id,code:x.asset_code,name:x.name,manufacturer:x.manufacturer||'',model:x.model||'',serial:x.serial_number||'',manufactureDate:x.manufacture_date||'',installationDate:x.installation_date||'',location:x.location||'',fuelType:x.fuel_type||'',engineManufacturer:x.engine_manufacturer||'',engineModel:x.engine_model||'',engineSerial:x.engine_serial_number||'',alternatorManufacturer:x.alternator_manufacturer||'',alternatorModel:x.alternator_model||'',controllerModel:x.controller_model||'',standbyKva:x.standby_kva??'',standbyKw:x.standby_kw??'',primeKva:x.prime_kva??'',primeKw:x.prime_kw??'',voltage:x.rated_voltage||'',phases:x.phases??'',frequency:x.frequency_hz??'',powerFactor:x.power_factor??'',rpm:x.rated_rpm??'',standbyCurrent:x.standby_current_a??'',primeCurrent:x.prime_current_a??'',ambient:x.ambient_temperature_c??'',tank:x.fuel_tank_capacity_l??'',hours:x.hour_meter_reading??'',hoursAt:x.hour_meter_recorded_at||'',status:x.operational_status||'unknown',notes:x.notes||''}));
+    S.generatorFuelLogs=fuel.error?[]:(fuel.data||[]).map(x=>({id:x.id,generatorId:x.generator_id,date:x.refuelled_at,litres:x.quantity_litres,cost:x.amount_paid_ngn??'',hours:x.hour_meter_reading??'',source:x.supplier_or_source||'',notes:x.notes||''}));
+    S.generatorMaintenance=gm.error?[]:(gm.data||[]).map(x=>({id:x.id,generatorId:x.generator_id,date:x.service_date,hours:x.hour_meter_reading??'',type:x.service_type,work:x.work_performed,parts:x.parts_used||'',cost:x.cost_ngn??'',nextDate:x.next_due_date||'',nextHours:x.next_due_hours??'',by:x.performed_by||''}));
+    S.generatorFaults=gf.error?[]:(gf.data||[]).map(x=>({id:x.id,generatorId:x.generator_id,date:x.reported_at,description:x.description,priority:x.priority,status:x.status,reportedBy:x.reported_by||'',resolvedAt:x.resolved_at||'',action:x.action_taken||'',repairedBy:x.repaired_by||'',cost:x.cost_ngn??''}));
+    appRole=role.error?null:(role.data&&role.data.role)||null;
+    const sig=JSON.stringify([S.devices,S.faults,S.services,S.audits,S.locations,S.generators,S.generatorFuelLogs,S.generatorMaintenance,S.generatorFaults,appRole]);dataChanged=sig!==lastSig;lastSig=sig;
     loaded=true;
     return true;
   }catch(e){toast('Could not reach the server. Check your connection.');return false;}
@@ -295,7 +312,7 @@ function deviceForm(d){
     DL+field('Device name','name',{required:true,value:d.name,placeholder:'e.g. Patient monitor'})+
     field('Type','category',{list:'cats',value:d.category})+
     '<div class="two">'+field('Make and model','model',{value:d.model})+field('Serial number','serial',{value:d.serial})+'</div>'+
-    field('Ward or location','ward',{required:true,list:'wards',value:d.ward})+
+    field('Ward or location','ward',{required:true,options:(S.locations.filter(x=>x.active).map(x=>[x.name,x.name]).concat(d.ward&&!S.locations.some(x=>x.name===d.ward)?[[d.ward,d.ward+' (existing)']]:[])),value:d.ward})+
     '<label class="f" style="display:flex;gap:10px;align-items:center"><input type="checkbox" name="critical" value="1" style="width:auto;margin:0;min-height:0"'+(d.critical?' checked':'')+'> Critical equipment (life support or emergency use)</label>'+
     '<div class="two">'+field('Service schedule','ppmDays',{value:d.ppmDays||0,options:[[0,'No schedule'],[30,'Every month'],[90,'Every 3 months'],[180,'Every 6 months'],[365,'Every year']]})+
     field('Last serviced','baseline',{type:'date',value:d.baseline||''})+'</div>'+
@@ -524,7 +541,7 @@ function viewMore(){
   return '<h1>Account</h1><p class="sub">Signed in as '+esc(session&&session.user.email)+'</p>'+
   '<div class="list">'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Monthly report</div><div class="m">Uptime, faults, costs and overdue servicing, ready to print for management.</div><div class="btnrow"><a class="btn primary" href="#/report">Open monthly report</a></div></div>'+
-  '<div class="tag" style="--c:var(--brand)"><div class="n">Ward audit</div><div class="m">Walk a ward, scan every device, and see what is missing or in the wrong place.</div><div class="btnrow"><a class="btn primary" href="#/audit">'+(audit?'Continue audit':'Start an audit')+'</a></div></div>'+
+  '<div class="tag" style="--c:var(--brand)"><div class="n">Wards & departments</div><div class="m">Register and manage the hospital locations used when assigning equipment.</div><div class="btnrow"><a class="btn primary" href="#/locations">Open locations</a></div></div>'+\n  '<div class="tag" style="--c:var(--brand)"><div class="n">Generators</div><div class="m">Separate generator records, refuelling, servicing and breakdown history.</div><div class="btnrow"><a class="btn primary" href="#/generators">Open generators</a></div></div>'+\n  '<div class="tag" style="--c:var(--brand)"><div class="n">Ward audit</div><div class="m">Walk a ward, scan every device, and see what is missing or in the wrong place.</div><div class="btnrow"><a class="btn primary" href="#/audit">'+(audit?'Continue audit':'Start an audit')+'</a></div></div>'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Handover pack</div><div class="m">One Excel file with every device, fault, service and audit, for the next engineer or your records.</div><div class="btnrow"><button class="btn" data-act="handover">Download handover pack</button></div></div>'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Import devices from Excel</div><div class="m">Add many devices at once from a spreadsheet instead of typing each one.</div><div class="btnrow"><a class="btn" href="#/import">Import devices</a></div></div>'+
   '<div class="tag" style="--c:var(--brand)"><div class="n">Fault log for reports</div><div class="m">Spreadsheet of every fault with days down and cost.</div><div class="btnrow"><button class="btn" data-act="exportCsv">Download fault log (CSV)</button></div></div>'+
@@ -804,6 +821,120 @@ function exportCsv(){
   saveFile('fault-log-'+today()+'.csv',rows.map(r=>r.map(csvCell).join(',')).join('\n'),'text/csv');
 }
 
+
+/* ---------- Central Hospital: locations and generator infrastructure ---------- */
+function moduleGate(){
+  if(!modulesReady)return '<div class="empty" style="margin-top:14px"><b>Hospital modules are not connected yet.</b><p>'+esc(modulesError||'Apply the Central Hospital database migration in Supabase, then refresh.')+'</p></div>';
+  if(!appRole)return '<div class="empty" style="margin-top:14px"><b>Your hospital role has not been assigned.</b><p>Ask the application administrator to assign your account an admin, biomedical or viewer role in Supabase.</p></div>';
+  return '';
+}
+function locationByName(name){return S.locations.find(x=>x.name===name);}
+function viewLocations(){
+  let h='<div class="top"><a class="back" href="#/more">‹ Account</a>'+(canManageHospital()?'<button class="btn primary" data-act="addLocation">Add location</button>':'')+'</div><h1>Wards & departments</h1><p class="sub">Hospital locations used to organise equipment and audits.</p>';
+  const gate=moduleGate();if(gate)return h+gate;
+  const active=S.locations.filter(x=>x.active),inactive=S.locations.filter(x=>!x.active);
+  h+='<div class="stats"><div class="stat"><b>'+active.length+'</b><span>Active locations</span></div><div class="stat"><b>'+inactive.length+'</b><span>Inactive locations</span></div></div>';
+  h+='<div class="sec"><h2>Active locations</h2>';
+  h+=active.length?'<div class="list">'+active.map(x=>'<div class="tag" style="--c:var(--brand)"><div class="t"><div><div class="n">'+esc(x.name)+'</div><div class="m">'+(x.type==='ward'?'Ward':'Department')+' · '+S.devices.filter(d=>d.ward===x.name).length+' equipment records</div></div><span class="pill ok">Active</span></div>'+(x.notes?'<div class="d">'+esc(x.notes)+'</div>':'')+(canManageHospital()?'<div class="btnrow"><button class="btn" data-act="editLocation" data-id="'+x.id+'">Edit</button><button class="btn" data-act="deactivateLocation" data-id="'+x.id+'">Deactivate</button></div>':'')+'</div>').join('')+'</div>':'<div class="empty">No active locations.</div>';
+  if(inactive.length)h+='<div class="sec"><h2>Inactive locations</h2><div class="list">'+inactive.map(x=>'<div class="tag" style="--c:var(--retired)"><div class="n">'+esc(x.name)+'</div><div class="m">'+(x.type==='ward'?'Ward':'Department')+'</div>'+(canManageHospital()?'<div class="btnrow"><button class="btn" data-act="activateLocation" data-id="'+x.id+'">Reactivate</button></div>':'')+'</div>').join('')+'</div>';
+  return h;
+}
+function locationForm(x){
+  if(!canManageHospital()){toast('Your role cannot manage hospital locations');return;}
+  x=x||{};
+  sheet(x.id?'Edit location':'Register hospital location',
+    field('Location name','name',{required:true,value:x.name,placeholder:'e.g. Paediatric Ward'})+
+    field('Location type','type',{required:true,value:x.type||'ward',options:[['ward','Ward'],['department','Department']]})+
+    field('Notes','notes',{area:true,value:x.notes||''}),
+    async fd=>{
+      const row={name:fd.name,location_type:fd.type,notes:fd.notes||null,updated_at:new Date().toISOString()};
+      const q=x.id?sb.from('hospital_locations').update(row).eq('id',x.id):sb.from('hospital_locations').insert({...row,created_by:session.user.id});
+      if(await run(q,x.id?'Location updated':'Location registered'))closeSheet();
+    });
+}
+function viewGenerators(){
+  let h='<div class="top"><a class="back" href="#/more">‹ Account</a>'+(canManageHospital()?'<button class="btn primary" data-act="addGenerator">Register generator</button>':'')+'</div><h1>Generators</h1><p class="sub">Hospital power infrastructure · each generator has its own records.</p>';
+  const gate=moduleGate();if(gate)return h+gate;
+  h+='<div class="stats"><div class="stat"><b>'+S.generators.length+'</b><span>Registered generators</span></div><div class="stat"><b>'+S.generators.filter(g=>g.status==='operational').length+'</b><span>Marked operational</span></div></div>';
+  h+=S.generators.length?'<div class="list">'+S.generators.map(g=>'<a class="tag" style="--c:'+(g.status==='operational'?'var(--ok)':g.status==='out_of_service'?'var(--bad)':'var(--warn)')+'" href="#/generator/'+g.id+'"><div class="t"><div><div class="n">'+esc(g.name)+'</div><div class="m">'+esc(g.code)+' · '+esc([g.manufacturer,g.model].filter(Boolean).join(' '))+'</div></div><span class="pill '+(g.status==='operational'?'ok':g.status==='out_of_service'?'bad':'warn')+'">'+esc(g.status.replaceAll('_',' '))+'</span></div><div class="d">'+(g.standbyKva!==''?esc(g.standbyKva)+' kVA standby':'Capacity not recorded')+(g.location?' · '+esc(g.location):'')+'</div></a>').join('')+'</div>':'<div class="empty">No generators registered yet. Register the hospital's two generators separately.</div>';
+  return h;
+}
+function generatorForm(g){
+  if(!canManageHospital()){toast('Your role cannot register or edit generators');return;}
+  const e=!!g;g=g||{};
+  const f=(label,name,value,type)=>field(label,name,{value:value??'',type:type||'text'});
+  sheet(e?'Edit generator':'Register generator',
+    f('Generator name','name',g.name)+f('Asset code','code',g.code||('GEN-'+Date.now()))+
+    '<div class="two">'+f('Manufacturer','manufacturer',g.manufacturer)+f('Model','model',g.model)+'</div>'+
+    '<div class="two">'+f('Serial number','serial',g.serial)+f('Manufacture date','manufactureDate',g.manufactureDate,'date')+'</div>'+
+    '<div class="two">'+f('Installation date','installationDate',g.installationDate,'date')+f('Installation location','location',g.location)+'</div>'+
+    '<div class="two">'+field('Fuel type','fuelType',{value:g.fuelType||'Diesel',options:[['Diesel','Diesel'],['Natural gas','Natural gas'],['Other','Other'],['Unknown','Unknown']]})+field('Operational status','status',{value:g.status||'unknown',options:[['unknown','Not yet verified'],['operational','Operational'],['under_maintenance','Under maintenance'],['out_of_service','Out of service'],['retired','Retired']]})+'</div>'+
+    '<h3 class="sec">Engine, alternator and controller</h3>'+
+    '<div class="two">'+f('Engine manufacturer','engineManufacturer',g.engineManufacturer)+f('Engine model','engineModel',g.engineModel)+'</div>'+
+    '<div class="two">'+f('Engine serial number','engineSerial',g.engineSerial)+f('Alternator manufacturer','alternatorManufacturer',g.alternatorManufacturer)+'</div>'+
+    '<div class="two">'+f('Alternator model','alternatorModel',g.alternatorModel)+f('Controller model','controllerModel',g.controllerModel)+'</div>'+
+    '<h3 class="sec">Electrical ratings</h3>'+
+    '<div class="two">'+f('Standby capacity (kVA)','standbyKva',g.standbyKva,'number')+f('Standby output (kW)','standbyKw',g.standbyKw,'number')+'</div>'+
+    '<div class="two">'+f('Prime capacity (kVA)','primeKva',g.primeKva,'number')+f('Prime output (kW)','primeKw',g.primeKw,'number')+'</div>'+
+    '<div class="two">'+f('Rated voltage','voltage',g.voltage)+f('Phases','phases',g.phases,'number')+'</div>'+
+    '<div class="two">'+f('Frequency (Hz)','frequency',g.frequency,'number')+f('Power factor','powerFactor',g.powerFactor,'number')+'</div>'+
+    '<div class="two">'+f('Rated speed (RPM)','rpm',g.rpm,'number')+f('Fuel tank capacity (L)','tank',g.tank,'number')+'</div>'+
+    '<div class="two">'+f('Standby current (A)','standbyCurrent',g.standbyCurrent,'number')+f('Prime current (A)','primeCurrent',g.primeCurrent,'number')+'</div>'+
+    '<div class="two">'+f('Ambient reference temperature (°C)','ambient',g.ambient,'number')+f('Current hour-meter reading','hours',g.hours,'number')+'</div>'+
+    field('Notes / verification details','notes',{area:true,value:g.notes||'',placeholder:'Record which nameplate/manual supports these specifications. Leave unknown values blank.'}),
+    async fd=>{
+      if(!fd.name.trim()||!fd.code.trim()){toast('Generator name and asset code are required');return;}
+      const row={asset_code:fd.code,name:fd.name,manufacturer:fd.manufacturer||null,model:fd.model||null,serial_number:fd.serial||null,manufacture_date:fd.manufactureDate||null,installation_date:fd.installationDate||null,location:fd.location||null,fuel_type:fd.fuelType||null,engine_manufacturer:fd.engineManufacturer||null,engine_model:fd.engineModel||null,engine_serial_number:fd.engineSerial||null,alternator_manufacturer:fd.alternatorManufacturer||null,alternator_model:fd.alternatorModel||null,controller_model:fd.controllerModel||null,standby_kva:numOrNull(fd.standbyKva),standby_kw:numOrNull(fd.standbyKw),prime_kva:numOrNull(fd.primeKva),prime_kw:numOrNull(fd.primeKw),rated_voltage:fd.voltage||null,phases:numOrNull(fd.phases),frequency_hz:numOrNull(fd.frequency),power_factor:numOrNull(fd.powerFactor),rated_rpm:numOrNull(fd.rpm),standby_current_a:numOrNull(fd.standbyCurrent),prime_current_a:numOrNull(fd.primeCurrent),ambient_temperature_c:numOrNull(fd.ambient),fuel_tank_capacity_l:numOrNull(fd.tank),hour_meter_reading:numOrNull(fd.hours),hour_meter_recorded_at:fd.hours!==''?new Date().toISOString():null,operational_status:fd.status,notes:fd.notes||null,updated_at:new Date().toISOString()};
+      const q=e?sb.from('generators').update(row).eq('id',g.id):sb.from('generators').insert({...row,created_by:session.user.id});
+      if(await run(q,e?'Generator updated':'Generator registered')){closeSheet();if(!e){const newest=S.generators.find(x=>x.code===fd.code);if(newest)location.hash='#/generator/'+newest.id;}}
+    });
+}
+function numOrNull(v){return v===''||v==null?null:Number(v);}
+function generatorById(id){return S.generators.find(g=>g.id===id);}
+function generatorLogForm(g,kind){
+  if(!canManageHospital()){toast('Your role cannot add generator records');return;}
+  if(kind==='fuel'){
+    sheet('Record refuelling · '+g.name,
+      '<div class="two">'+field('Date and time','date',{type:'datetime-local',value:new Date().toISOString().slice(0,16),required:true})+field('Diesel added (litres)','litres',{type:'number',required:true})+'</div>'+
+      '<div class="two">'+field('Amount paid (₦)','cost',{type:'number'})+field('Hour-meter reading','hours',{type:'number',value:g.hours})+'</div>'+
+      field('Supplier / source','source')+field('Notes','notes',{area:true}),
+      async fd=>{if(Number(fd.litres)<=0){toast('Enter a quantity greater than zero');return;}const q=sb.from('generator_fuel_logs').insert({generator_id:g.id,refuelled_at:new Date(fd.date).toISOString(),quantity_litres:Number(fd.litres),amount_paid_ngn:numOrNull(fd.cost),hour_meter_reading:numOrNull(fd.hours),recorded_by:session.user.id,supplier_or_source:fd.source||null,notes:fd.notes||null});if(await run(q,'Refuelling recorded'))closeSheet();});
+  }else if(kind==='maintenance'){
+    sheet('Log generator service · '+g.name,
+      '<div class="two">'+field('Service date','date',{type:'date',value:today(),required:true})+field('Hour-meter reading','hours',{type:'number',value:g.hours})+'</div>'+
+      field('Service type','type',{options:[['Routine inspection','Routine inspection'],['Preventive maintenance','Preventive maintenance'],['Oil and filter service','Oil and filter service'],['Repair','Repair'],['Load test','Load test'],['Other','Other']]})+
+      field('Work performed','work',{area:true,required:true})+field('Parts / consumables used','parts')+
+      '<div class="two">'+field('Cost (₦)','cost',{type:'number'})+field('Performed by','by')+'</div>'+
+      '<div class="two">'+field('Next service date','nextDate',{type:'date'})+field('Next service due at (hours)','nextHours',{type:'number'})+'</div>',
+      async fd=>{const q=sb.from('generator_maintenance').insert({generator_id:g.id,service_date:fd.date,hour_meter_reading:numOrNull(fd.hours),service_type:fd.type,work_performed:fd.work,parts_used:fd.parts||null,cost_ngn:numOrNull(fd.cost),next_due_date:fd.nextDate||null,next_due_hours:numOrNull(fd.nextHours),performed_by:fd.by||null,recorded_by:session.user.id});if(await run(q,'Generator service logged'))closeSheet();});
+  }else{
+    sheet('Report generator breakdown · '+g.name,
+      field('Date and time','date',{type:'datetime-local',value:new Date().toISOString().slice(0,16),required:true})+
+      field('What is wrong?','description',{area:true,required:true})+
+      field('Priority','priority',{options:[['Normal','Normal'],['Urgent','Urgent – hospital power affected']]})+
+      field('Reported by','by'),
+      async fd=>{const q=sb.from('generator_faults').insert({generator_id:g.id,reported_at:new Date(fd.date).toISOString(),description:fd.description,priority:fd.priority,reported_by:fd.by||session.user.email});if(await run(q,'Generator breakdown reported'))closeSheet();});
+  }
+}
+function viewGenerator(id){
+  const g=generatorById(id);
+  let h='<div class="top"><a class="back" href="#/generators">‹ Generators</a>'+(g&&canManageHospital()?'<button class="btn" data-act="editGenerator" data-id="'+g.id+'">Edit</button>':'')+'</div>';
+  const gate=moduleGate();if(gate)return h+gate;
+  if(!g)return h+'<div class="empty">Generator not found.</div>';
+  const fuel=S.generatorFuelLogs.filter(x=>x.generatorId===g.id),services=S.generatorMaintenance.filter(x=>x.generatorId===g.id),faults=S.generatorFaults.filter(x=>x.generatorId===g.id);
+  h+='<div class="hero" style="--c:'+(g.status==='operational'?'var(--ok)':'var(--warn)')+'"><div class="band"><span>'+esc(g.status.replaceAll('_',' '))+'</span><span>'+esc(g.code)+'</span></div><div class="body"><h1 style="font-size:24px">'+esc(g.name)+'</h1><div class="id">'+esc([g.manufacturer,g.model].filter(Boolean).join(' ')||'Model not recorded')+'</div><dl class="kv">'+[
+    ['Serial number',g.serial],['Location',g.location],['Fuel',g.fuelType],['Standby rating',g.standbyKva!==''?g.standbyKva+' kVA / '+(g.standbyKw===''?'—':g.standbyKw+' kW'):'Not recorded'],['Prime rating',g.primeKva!==''?g.primeKva+' kVA / '+(g.primeKw===''?'—':g.primeKw+' kW'):'Not recorded'],['Voltage',g.voltage],['Phase',g.phases],['Frequency',g.frequency!==''?g.frequency+' Hz':''],['Power factor',g.powerFactor],['Speed',g.rpm!==''?g.rpm+' RPM':''],['Engine', [g.engineManufacturer,g.engineModel].filter(Boolean).join(' ')],['Alternator', [g.alternatorManufacturer,g.alternatorModel].filter(Boolean).join(' ')],['Controller',g.controllerModel],['Hour meter',g.hours!==''?g.hours+' h':'Not recorded'],['Fuel tank',g.tank!==''?g.tank+' L':'Not recorded']
+  ].filter(x=>x[1]!==''&&x[1]!=null).map(x=>'<dt>'+esc(x[0])+'</dt><dd>'+esc(x[1])+'</dd>').join('')+'</dl>'+(g.notes?'<p class="small muted">'+esc(g.notes)+'</p>':'')+'</div></div>';
+  if(canManageHospital())h+='<div class="actions"><button class="btn primary" data-act="fuelLog" data-id="'+g.id+'">Record refuelling</button><button class="btn" data-act="generatorService" data-id="'+g.id+'">Log service</button><button class="btn" data-act="generatorFault" data-id="'+g.id+'">Report breakdown</button></div>';
+  h+='<div class="sec"><h2>Refuelling history <small>'+fuel.length+' entries</small></h2>';
+  h+=fuel.length?'<div class="list">'+fuel.map(x=>'<div class="tag"><div class="n">'+fmt(x.date.slice(0,10))+' · '+esc(x.litres)+' L</div><div class="m">'+(x.cost!==''?'₦'+Number(x.cost).toLocaleString('en-NG')+' · ':'')+(x.hours!==''?esc(x.hours)+' hour-meter hours':'Hour meter not recorded')+'</div>'+(x.source?'<div class="d">'+esc(x.source)+'</div>':'')+'</div>').join('')+'</div>':'<div class="empty">No refuelling records yet.</div>';
+  h+='</div><div class="sec"><h2>Service history <small>'+services.length+' entries</small></h2>';
+  h+=services.length?'<div class="list">'+services.map(x=>'<div class="tag" style="--c:var(--brand)"><div class="n">'+fmt(x.date)+' · '+esc(x.type)+'</div><div class="d">'+esc(x.work)+'</div><div class="m">'+(x.hours!==''?esc(x.hours)+' hour-meter hours · ':'')+(x.by?'By '+esc(x.by):'')+'</div>'+(x.nextDate||x.nextHours!==''?'<div class="m">Next due: '+(x.nextDate?fmt(x.nextDate):'')+(x.nextHours!==''?' · '+esc(x.nextHours)+' hours':'')+'</div>':'')+'</div>').join('')+'</div>':'<div class="empty">No generator service records yet.</div>';
+  h+='</div><div class="sec"><h2>Breakdown history <small>'+faults.length+' records</small></h2>';
+  h+=faults.length?'<div class="list">'+faults.map(x=>'<div class="tag" style="--c:'+(x.status==='Resolved'?'var(--ok)':'var(--bad)')+'"><div class="t"><div class="n">'+fmt(x.date.slice(0,10))+'</div><span class="pill '+(x.status==='Resolved'?'ok':'bad')+'">'+esc(x.status)+'</span></div><div class="d">'+esc(x.description)+'</div>'+(x.action?'<div class="m">Action: '+esc(x.action)+'</div>':'')+'</div>').join('')+'</div>':'<div class="empty">No breakdowns recorded.</div>';
+  return h+'</div>';
+}
+
 /* ---------- router ---------- */
 function render(){
   stopScan();scanCb=null;
@@ -827,6 +958,9 @@ function render(){
     case 'report':nav='more';h=viewReport();break;
     case 'import':nav='more';h=viewImport();break;
     case 'audit':nav='more';h=viewAudit();break;
+    case 'locations':nav='more';h=viewLocations();break;
+    case 'generators':nav='more';h=viewGenerators();break;
+    case 'generator':nav='more';h=viewGenerator(decodeURIComponent(p[1]||''));break;
     default:h=viewToday();
   }
   $('#app').innerHTML=h;
@@ -854,6 +988,15 @@ document.addEventListener('click',async e=>{
   switch(a){
     case 'closeSheet':closeSheet();break;
     case 'addDevice':deviceForm();break;
+    case 'addLocation':locationForm();break;
+    case 'editLocation':locationForm(S.locations.find(x=>x.id===id));break;
+    case 'deactivateLocation':if(confirm('Deactivate this location? Existing equipment records will be preserved.'))await run(sb.from('hospital_locations').update({active:false,updated_at:new Date().toISOString()}).eq('id',id),'Location deactivated');break;
+    case 'activateLocation':await run(sb.from('hospital_locations').update({active:true,updated_at:new Date().toISOString()}).eq('id',id),'Location reactivated');break;
+    case 'addGenerator':generatorForm();break;
+    case 'editGenerator':generatorForm(generatorById(id));break;
+    case 'fuelLog':{const g=generatorById(id);if(g)generatorLogForm(g,'fuel');break;}
+    case 'generatorService':{const g=generatorById(id);if(g)generatorLogForm(g,'maintenance');break;}
+    case 'generatorFault':{const g=generatorById(id);if(g)generatorLogForm(g,'fault');break;}
     case 'filter':devFilter=t.dataset.v;render();break;
     case 'refresh':if(await loadAll()){render();toast('Up to date');}break;
     case 'edit':deviceForm(dev(id));break;
@@ -899,7 +1042,7 @@ window.addEventListener('hashchange',()=>{closeSheet();render();window.scrollTo(
 sb.auth.onAuthStateChange(async (ev,s)=>{
   const was=!!session;session=s;
   if(session&&!was){await loadAll();render();}
-  else if(!session&&was){S={devices:[],faults:[],services:[],audits:[]};loaded=false;render();}
+  else if(!session&&was){S={devices:[],faults:[],services:[],audits:[],locations:[],generators:[],generatorFuelLogs:[],generatorMaintenance:[],generatorFaults:[]};appRole=null;modulesReady=false;loaded=false;render();}
 });
 if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 (async function init(){
