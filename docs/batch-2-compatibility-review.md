@@ -55,6 +55,12 @@ No Supabase database connector or staging database connection is available in th
 - Tests proving existing fault reports, service logs, audit, import/export and printed QR labels still work.
 - A tested rollback procedure.
 
+## Work completed after this review
+
+A read-only canonical asset register screen has now been added at `#/assets`. It queries `public.assets` directly and uses database-side search, status/department/category filters, exact row counts and server-side pagination (25, 50 or 100 rows per page). It is intentionally separate from the legacy equipment register and does not create, edit, transfer or delete records. If the Batch 1 schema is not installed, it displays a clear unavailable message without blocking the existing equipment module.
+
+The complete legacy-to-canonical write compatibility layer remains gated on verified database schema and staging tests. The existing equipment register still reads and writes `devices`, and its legacy data loading remains unpaginated. Do not claim the entire application has been load-tested for 10,000 assets.
+
 ## Next implementation step
 
-Once the schema evidence is available, complete the compatibility layer and server-paginated register on this development branch. Do not apply Batch 1 migrations to production or merge/deploy this branch as part of this review.
+Obtain the schema evidence, verify the foundation migration on a restored staging copy, and then complete canonical asset create/edit/transfer workflows and a tested compatibility strategy for existing fault/service history. Do not apply migrations to production or merge/deploy this branch without explicit approval.
