@@ -388,6 +388,14 @@ drop policy if exists asset_audit_logs_insert_authenticated on public.asset_audi
 create policy asset_audit_logs_insert_authenticated on public.asset_audit_logs
   for insert to authenticated with check (actor_id = auth.uid());
 
+-- Explicit Data API privileges for current Supabase defaults; RLS remains the row boundary.
+revoke all on public.hospitals, public.departments, public.locations,
+  public.asset_categories, public.assets, public.asset_relationships,
+  public.asset_transfers, public.asset_documents, public.asset_audit_logs from anon;
+grant select, insert, update, delete on public.hospitals, public.departments,
+  public.locations, public.asset_categories, public.assets,
+  public.asset_relationships, public.asset_transfers, public.asset_documents to authenticated;
+grant select on public.asset_audit_logs to authenticated;
 commit;
 
 -- Verification queries to run on staging after applying:
