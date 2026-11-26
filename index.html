@@ -148,6 +148,12 @@ label.f textarea{min-height:84px;resize:vertical}
 .lab b{display:block;font-size:14px;margin-top:4px}
 .lab span{font-size:12px;color:#444}
 
+#update-banner{position:sticky;top:0;z-index:1000;background:var(--ink);color:var(--bg);padding:12px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 3px 12px rgba(0,0,0,.18)}
+#update-banner[hidden]{display:none}
+#update-banner .update-copy{flex:1;min-width:0;font-size:14px;font-weight:600}
+#update-banner .update-copy small{display:block;font-size:12px;font-weight:400;opacity:.82}
+#update-banner button{border:0;border-radius:8px;padding:9px 12px;background:var(--brand);color:var(--on-brand);font-weight:700;white-space:nowrap;cursor:pointer}
+#update-banner button:focus-visible{outline:3px solid var(--brand);outline-offset:3px}
 #toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;font-weight:600;z-index:60;max-width:90%;opacity:0;pointer-events:none;transition:opacity .2s}
 #toast.show{opacity:1}
 
@@ -176,6 +182,10 @@ label.f textarea{min-height:84px;resize:vertical}
 </style>
 </head>
 <body>
+<section id="update-banner" role="status" aria-live="polite" hidden>
+  <div class="update-copy">A new version is ready.<small>Refresh to use the latest Equipment Tracker update.</small></div>
+  <button id="apply-update" type="button">Update now</button>
+</section>
 <main id="app"></main>
 <nav class="bar" aria-label="Main" style="display:none">
   <div class="in">
@@ -1128,7 +1138,47 @@ sb.auth.onAuthStateChange(async (ev,s)=>{
   if(session&&!was){assetRegister={rows:[],total:0,page:0,pageSize:25,search:'',status:'all',department:'all',category:'all',departments:[],categories:[],ready:false,loading:false,error:''};await loadAll();render();}
   else if(!session&&was){S={devices:[],faults:[],services:[],audits:[],locations:[],generators:[],generatorFuelLogs:[],generatorMaintenance:[],generatorFaults:[]};assetRegister={rows:[],total:0,page:0,pageSize:25,search:'',status:'all',department:'all',category:'all',departments:[],categories:[],ready:false,loading:false,error:''};appRole=null;modulesReady=false;loaded=false;render();}
 });
-if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
+/* ---------- safe app updates ---------- */
+let updateRegistration=null,updateRefreshRequested=false,updateCheckTimer=null;
+function showUpdateNotice(){
+  const banner=$('#update-banner');
+  if(banner)banner.hidden=false;
+}
+function applyWaitingUpdate(){
+  if(!updateRegistration||!updateRegistration.waiting)return;
+  updateRefreshRequested=true;
+  updateRegistration.waiting.postMessage({type:'SKIP_WAITING'});
+}
+if('serviceWorker' in navigator){
+  $('#apply-update').addEventListener('click',applyWaitingUpdate);
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{
+    if(updateRefreshRequested&&!window.__equipmentUpdateReloaded){
+      window.__equipmentUpdateReloaded=true;
+      location.reload();
+    }
+  });
+  window.addEventListener('load',async()=>{
+    try{
+      updateRegistration=await navigator.serviceWorker.register('./sw.js');
+      if(updateRegistration.waiting&&navigator.serviceWorker.controller)showUpdateNotice();
+      updateRegistration.addEventListener('updatefound',()=>{
+        const installing=updateRegistration.installing;
+        if(!installing)return;
+        installing.addEventListener('statechange',()=>{
+          if(installing.state==='installed'&&navigator.serviceWorker.controller)showUpdateNotice();
+        });
+      });
+      const checkForAppUpdate=()=>{
+        if(document.visibilityState==='visible'&&navigator.onLine&&updateRegistration)updateRegistration.update().catch(()=>{});
+      };
+      checkForAppUpdate();
+      updateCheckTimer=setInterval(checkForAppUpdate,60*60*1000);
+      document.addEventListener('visibilitychange',()=>{
+        if(document.visibilityState==='visible')checkForAppUpdate();
+      });
+    }catch(err){console.warn('App update check unavailable:',err);}
+  });
+}
 (async function init(){
   const r=await sb.auth.getSession();session=r.data&&r.data.session;
   if(session)await loadAll();

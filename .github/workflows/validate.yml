@@ -30,6 +30,8 @@ jobs:
           PY
       - name: Validate JavaScript syntax
         run: node --check /tmp/equipment-tracker-app.js
+      - name: Validate service worker syntax
+        run: node --check sw.js
       - name: Check migrations for destructive table operations
         run: |
           python3 - <<'PY'
