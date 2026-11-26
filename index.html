@@ -457,7 +457,7 @@ function viewAssets(){
   h+='<label class="f">Department<select id="assetDepartment"><option value="all">All departments</option>'+assetRegister.departments.map(x=>'<option value="'+esc(x.id)+'"'+(assetRegister.department===x.id?' selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select></label></div>';
   h+='<label class="f">Category<select id="assetCategory"><option value="all">All categories</option>'+assetRegister.categories.map(x=>'<option value="'+esc(x.id)+'"'+(assetRegister.category===x.id?' selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select></label>';
   h+='<div class="list">';
-  h+=assetRegister.rows.length?assetRegister.rows.map(x=>'<div class="tag"><div class="t"><div><div class="n">'+esc(x.name)+(x.critical?' <span class="pill bad">Critical</span>':'')+'</div><div class="m">'+esc(x.asset_code)+' · '+esc(dmap[x.department_id]||'Department not assigned')+'</div></div><span class="pill">'+esc(String(x.operational_status||'unknown').replaceAll('_',' '))+'</span></div><div class="m">'+esc(cmap[x.category_id]||x.asset_kind||'Uncategorised')+(x.model?' · '+esc(x.model):'')+(x.serial_number?' · S/N '+esc(x.serial_number):'')+'</div>'+(x.physical_condition?'<div class="m">Condition: '+esc(x.physical_condition)+'</div>':'')+(canManageHospital()?'<div class="btnrow"><button class="btn" data-act="editAsset" data-id="'+esc(x.id)+'">Edit asset record</button></div>':'')+'</div>').join(''):'<div class="empty">No assets match these filters.</div>';
+  h+=assetRegister.rows.length?assetRegister.rows.map(x=>'<div class="tag"><div class="t"><div><div class="n">'+esc(x.name)+(x.critical?' <span class="pill bad">Critical</span>':'')+'</div><div class="m">'+esc(x.asset_code)+' · '+esc(dmap[x.department_id]||'Department not assigned')+'</div></div><span class="pill">'+esc(String(x.operational_status||'unknown').replaceAll('_',' '))+'</span></div><div class="m">'+esc(cmap[x.category_id]||x.asset_kind||'Uncategorised')+(x.model?' · '+esc(x.model):'')+(x.serial_number?' · S/N '+esc(x.serial_number):'')+'</div>'+(x.physical_condition?'<div class="m">Condition: '+esc(x.physical_condition)+'</div>':'')+(canManageHospital()?'<div class="btnrow"><button class="btn" data-act="editAsset" data-id="'+esc(x.id)+'">Edit asset</button><button class="btn" data-act="transferAsset" data-id="'+esc(x.id)+'">Transfer</button></div>':'')+'</div>').join(''):'<div class="empty">No assets match these filters.</div>';
   h+='</div><div class="top" style="margin-top:16px"><span class="small muted">Showing '+start+'–'+end+' of '+assetRegister.total+'</span><div class="btnrow"><button class="btn" data-act="assetPrev"'+(assetRegister.page===0?' disabled':'')+'>Previous</button><button class="btn" data-act="assetNext"'+(end>=assetRegister.total?' disabled':'')+'>Next</button></div></div>';
   h+='<label class="f">Rows per page<select id="assetPageSize">'+[25,50,100].map(n=>'<option value="'+n+'"'+(assetRegister.pageSize===n?' selected':'')+'>'+n+'</option>').join('')+'</select></label>';
   return h;
@@ -521,6 +521,36 @@ async function assetForm(asset){
       if(await run(q,current?'Asset updated':'Asset registered')){
         closeSheet();assetRegister.ready=false;assetRegister.page=0;render();
       }
+    });
+}
+
+
+async function transferAssetForm(asset){
+  if(!canManageHospital()){toast('Your role cannot transfer hospital assets');return;}
+  const [departments,locations]=await Promise.all([
+    sb.from('departments').select('id,name').eq('active',true).order('name'),
+    sb.from('locations').select('id,name,department_id').eq('active',true).order('name')
+  ]);
+  const failed=[departments,locations].find(x=>x.error);
+  if(failed){toast('Transfer form could not load locations: '+failed.error.message);return;}
+  const destination=departments.data.filter(x=>x.id!==asset.department_id);
+  sheet('Transfer asset · '+asset.asset_code,
+    '<div class="note"><b>'+esc(asset.name)+'</b><br>Current department: '+esc(asset.department_name||'Current department')+'</div>'+
+    field('Destination department','to_department_id',{required:true,options:destination.map(x=>[x.id,x.name])})+
+    field('Destination room / location','to_location_id',{options:[['','No specific room'],...locations.data.map(x=>[x.id,x.name])]})+
+    field('Transfer date','transfer_date',{type:'datetime-local',required:true,value:new Date().toISOString().slice(0,16)})+
+    field('Reason for transfer','reason',{area:true,required:true,placeholder:'State why the asset is being moved.'}),
+    async fd=>{
+      const chosen=locations.data.find(x=>x.id===fd.to_location_id);
+      if(fd.to_location_id&&(!chosen||chosen.department_id!==fd.to_department_id)){toast('Choose a room within the destination department');return;}
+      const result=await run(sb.rpc('transfer_asset',{
+        p_asset_id:asset.id,
+        p_to_department_id:fd.to_department_id,
+        p_to_location_id:fd.to_location_id||null,
+        p_transfer_date:new Date(fd.transfer_date).toISOString(),
+        p_reason:fd.reason.trim()
+      }),'Asset transferred and transfer history recorded');
+      if(result){closeSheet();assetRegister.ready=false;render();}
     });
 }
 
@@ -1154,6 +1184,7 @@ document.addEventListener('click',async e=>{
     case 'assetRetry':assetRegister.ready=false;assetRegister.error='';render();break;
     case 'addAsset':assetForm();break;
     case 'editAsset':{const row=assetRegister.rows.find(x=>x.id===id);if(row)assetForm(row);break;}
+    case 'transferAsset':{const row=assetRegister.rows.find(x=>x.id===id);if(row){const dep=assetRegister.departments.find(x=>x.id===row.department_id);transferAssetForm({...row,department_name:dep?.name||''});}break;}
     case 'assetSearch':assetRegister.search=$('#assetSearch').value.trim();assetRegister.page=0;assetRegister.ready=false;render();break;
     case 'assetPrev':assetRegister.page=Math.max(0,assetRegister.page-1);assetRegister.ready=false;render();break;
     case 'assetNext':assetRegister.page++;assetRegister.ready=false;render();break;
