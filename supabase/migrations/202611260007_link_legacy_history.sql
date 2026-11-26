@@ -90,6 +90,8 @@ create trigger services_sync_asset_id
 before insert or update of device_id, asset_id on public.services
 for each row execute function public.sync_legacy_history_asset_id();
 
+-- History-link synchronisation is trigger-only, not a public RPC endpoint.
+revoke all on function public.sync_legacy_history_asset_id() from public, anon, authenticated;
 commit;
 
 -- Staging verification:
