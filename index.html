@@ -261,7 +261,7 @@ async function loadAll(){
     S.audits=au.error?[]:au.data.map(x=>({id:x.id,ward:x.ward,date:x.audit_date,expected:x.expected,found:x.found,missing:x.missing||[],unexpected:x.unexpected||[]}));
     modulesReady=!(loc.error||gen.error||fuel.error||gm.error||gf.error||role.error);
     modulesError=modulesReady?'':(loc.error||gen.error||fuel.error||gm.error||gf.error||role.error||{}).message||'Hospital modules database migration is not installed.';
-    S.locations=loc.error?[]:(loc.data||[]).map(x=>({id:x.id,name:x.name,type:x.location_type,active:x.active,notes:x.notes||''}));
+    S.locations=loc.error?[]:(loc.data||[]).map(x=>({id:x.id,departmentId:x.department_id||'',name:x.name,type:x.location_type,active:x.active,notes:x.notes||''}));
     S.generators=gen.error?[]:(gen.data||[]).map(x=>({id:x.id,code:x.asset_code,name:x.name,manufacturer:x.manufacturer||'',model:x.model||'',serial:x.serial_number||'',manufactureDate:x.manufacture_date||'',installationDate:x.installation_date||'',location:x.location||'',fuelType:x.fuel_type||'',engineManufacturer:x.engine_manufacturer||'',engineModel:x.engine_model||'',engineSerial:x.engine_serial_number||'',alternatorManufacturer:x.alternator_manufacturer||'',alternatorModel:x.alternator_model||'',controllerModel:x.controller_model||'',standbyKva:x.standby_kva??'',standbyKw:x.standby_kw??'',primeKva:x.prime_kva??'',primeKw:x.prime_kw??'',voltage:x.rated_voltage||'',phases:x.phases??'',frequency:x.frequency_hz??'',powerFactor:x.power_factor??'',rpm:x.rated_rpm??'',standbyCurrent:x.standby_current_a??'',primeCurrent:x.prime_current_a??'',ambient:x.ambient_temperature_c??'',tank:x.fuel_tank_capacity_l??'',hours:x.hour_meter_reading??'',hoursAt:x.hour_meter_recorded_at||'',status:x.operational_status||'unknown',notes:x.notes||''}));
     S.generatorFuelLogs=fuel.error?[]:(fuel.data||[]).map(x=>({id:x.id,generatorId:x.generator_id,date:x.refuelled_at,litres:x.quantity_litres,cost:x.amount_paid_ngn??'',hours:x.hour_meter_reading??'',source:x.supplier_or_source||'',notes:x.notes||''}));
     S.generatorMaintenance=gm.error?[]:(gm.data||[]).map(x=>({id:x.id,generatorId:x.generator_id,date:x.service_date,hours:x.hour_meter_reading??'',type:x.service_type,work:x.work_performed,parts:x.parts_used||'',cost:x.cost_ngn??'',nextDate:x.next_due_date||'',nextHours:x.next_due_hours??'',by:x.performed_by||''}));
@@ -391,7 +391,7 @@ function resolveForm(f){
 }
 
 /* ---------- QR ---------- */
-function qrPayload(id){return location.href.split('#')[0]+'#/r/'+id;}
+function qrPayload(id){const d=dev(id),loc=d&&S.locations.find(x=>x.name===d.ward);const p=new URLSearchParams();p.set('qrV','2');if(loc&&loc.departmentId)p.set('qrDeptId',loc.departmentId);if(d&&d.ward)p.set('qrDept',d.ward);return location.href.split('#')[0]+'#/r/'+encodeURIComponent(id)+'?'+p.toString();}
 function qrSvg(id){
   try{const q=qrcode(0,'M');q.addData(qrPayload(id));q.make();return q.createSvgTag({cellSize:4,margin:2,scalable:true});}
   catch(e){return '<div class="small">QR could not be drawn. Use the ID '+esc(id)+'.</div>';}
@@ -452,11 +452,12 @@ function viewDevices(q){
   return h;
 }
 
-function viewDevice(id){
+function viewDevice(id,qrMeta){
   const d=dev(id);
   if(!d)return '<div class="top"><a class="back" href="#/devices">‹ Devices</a></div><div class="empty">No device with ID <b>'+esc(id)+'</b>. Check the ID, or add the device first.</div>';
   const s=state(d),of=openFault(d),di=dueIn(d);
   let h='<div class="top"><a class="back" href="#/devices">‹ Devices</a></div>';
+  if(qrMeta&&qrMeta.qrDept&&String(qrMeta.qrDept).trim().toLowerCase()!==String(d.ward||'').trim().toLowerCase())h+='<div class="fault"><b>QR label may be out of date.</b><p>This label says '+esc(qrMeta.qrDept)+', but the current register says '+esc(d.ward)+'. Confirm the asset location and print a replacement label if it has been transferred.</p></div>';
   h+='<div class="hero" style="--c:'+s.c+'"><div class="band"><span>'+s.label+'</span><span>'+esc(d.id)+'</span></div><div class="body"><h1 style="font-size:24px">'+esc(d.name)+'</h1><div class="id">'+esc(d.ward)+(d.category?' · '+esc(d.category):'')+(d.critical?' · Critical equipment':'')+'</div>';
   h+='<dl class="kv"><dt>Make and model</dt><dd>'+esc(d.model||'-')+'</dd><dt>Serial number</dt><dd>'+esc(d.serial||'-')+'</dd><dt>Service schedule</dt><dd>'+intervalLabel(d.ppmDays)+'</dd><dt>Last serviced</dt><dd>'+(d.ppmDays||d.baseline?fmt(lastService(d)):'-')+'</dd>'+(di!==null?'<dt>Next service</dt><dd>'+fmt(new Date((dayNum(lastService(d))+Number(d.ppmDays))*864e5).toISOString().slice(0,10))+(di<0?' ('+(-di)+' days overdue)':'')+'</dd>':'')+(d.warrantyUntil?'<dt>Warranty ends</dt><dd>'+fmt(d.warrantyUntil)+(dayNum(d.warrantyUntil)<dayNum(today())?' (expired)':'')+'</dd>':'')+(d.vendor?'<dt>Vendor</dt><dd>'+esc(d.vendor)+'</dd>':'')+(d.replacementCost!==''?'<dt>Replacement cost</dt><dd>'+naira(d.replacementCost)+'</dd><dt>Repairs so far</dt><dd>'+naira(repairTotal(d))+'</dd>':'')+(d.vendorPhone?'<dt>Vendor phone</dt><dd><a href="tel:'+esc(d.vendorPhone)+'" style="color:var(--brand);font-weight:600">'+esc(d.vendorPhone)+'</a></dd>':'')+'</dl></div></div>';
   const rf=replaceFlag(d);
@@ -474,7 +475,7 @@ function viewDevice(id){
   h+='<div class="sec"><h2>History</h2>';
   h+=items.length?'<ul class="tl">'+items.map(i=>'<li style="--c:'+i.c+'"><div class="when">'+fmt(i.date)+'</div><div><b>'+esc(i.t)+'</b></div>'+(i.m?'<div class="small muted">'+esc(i.m)+'</div>':'')+(i.photo?'<div><button class="btn" style="min-height:36px;padding:6px 12px;margin-top:6px" data-act="photo" data-path="'+esc(i.photo)+'">View photo</button></div>':'')+'</li>').join('')+'</ul>':'<div class="empty">No history yet.</div>';
   h+='</div>';
-  h+='<div class="actions" style="margin-top:8px"><button class="btn" data-act="edit" data-id="'+d.id+'">Edit details</button><button class="btn" data-act="retire" data-id="'+d.id+'">'+(d.retired?'Bring back into use':'Retire device')+'</button><button class="btn danger wide" data-act="delete" data-id="'+d.id+'">Delete device and its history</button></div>';
+  h+='<div class="actions" style="margin-top:8px"><button class="btn" data-act="edit" data-id="'+d.id+'">Edit details</button><button class="btn" data-act="retire" data-id="'+d.id+'">'+(d.retired?'Bring back into use':'Retire device')+'</button></div>';
   return h;
 }
 
@@ -506,7 +507,7 @@ function startScan(){
         const k=Math.min(1,800/Math.max(vid.videoWidth,vid.videoHeight));
         cv.width=Math.max(1,Math.round(vid.videoWidth*k));cv.height=Math.max(1,Math.round(vid.videoHeight*k));cx.drawImage(vid,0,0,cv.width,cv.height);
         const im=cx.getImageData(0,0,cv.width,cv.height),r=jsQR(im.data,im.width,im.height,{inversionAttempts:'dontInvert'});
-        if(r&&r.data){const id=parseId(r.data);if(id){if(scanCb){if(Date.now()-lastHit>2000){lastHit=Date.now();scanCb(id);}}else{stopScan();location.hash='#/d/'+id;return;}}else msg.textContent='That code is not an equipment label.';}
+        if(r&&r.data){const id=parseId(r.data);if(id){if(scanCb){if(Date.now()-lastHit>2000){lastHit=Date.now();scanCb(id);}}else{stopScan();location.hash=deviceHash(id,parseQrMeta(r.data));return;}}else msg.textContent='That code is not an equipment label.';}
       }
       scanRaf=requestAnimationFrame(tick);
     };tick();
@@ -526,9 +527,9 @@ function decodePhoto(file){
       cv.width=Math.round(img.width*k);cv.height=Math.round(img.height*k);
       const cx=cv.getContext('2d',{willReadFrequently:true});cx.drawImage(img,0,0,cv.width,cv.height);
       const im=cx.getImageData(0,0,cv.width,cv.height),r=jsQR(im.data,im.width,im.height,{inversionAttempts:'attemptBoth'});
-      if(r&&r.data)found=parseId(r.data);
+      if(r&&r.data)found={id:parseId(r.data),meta:parseQrMeta(r.data)};
     });
-    if(found){if(scanCb){scanCb(found);msg.textContent='Looking for a QR code...';}else location.hash='#/d/'+found;}
+    if(found&&found.id){if(scanCb){scanCb(found.id);msg.textContent='Looking for a QR code...';}else location.hash=deviceHash(found.id,found.meta);}
     else{msg.textContent='No QR code found. Move closer, keep the label flat and well lit, then try again.';}
   };
   img.onerror=()=>{msg.textContent='Could not open that photo. Try again.';};
@@ -536,6 +537,8 @@ function decodePhoto(file){
 }
 function stopScan(){scanning=false;cancelAnimationFrame(scanRaf);if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}
 function parseId(t){const m=String(t).match(/EQ-\d{4,}/i);return m?m[0].toUpperCase():null;}
+function parseQrMeta(t){const raw=String(t),q=raw.indexOf('?');if(q<0)return {};try{const p=new URLSearchParams(raw.slice(q+1));return {qrV:p.get('qrV')||'',qrDeptId:p.get('qrDeptId')||'',qrDept:p.get('qrDept')||''};}catch(e){return {};}}
+function deviceHash(id,meta){const p=new URLSearchParams();if(meta&&meta.qrDept)p.set('qrDept',meta.qrDept);if(meta&&meta.qrDeptId)p.set('qrDeptId',meta.qrDeptId);const suffix=p.toString();return '#/d/'+encodeURIComponent(id)+(suffix?'?'+suffix:'');}
 
 function viewMore(){
   return '<h1>Account</h1><p class="sub">Signed in as '+esc(session&&session.user.email)+'</p>'+
@@ -772,7 +775,7 @@ async function flushQueue(){
   }finally{flushing=false;}
 }
 window.addEventListener('online',flushQueue);
-async function renderPublic(id){
+async function renderPublic(id,qrMeta){
   const app=$('#app');
   app.innerHTML='<h1>Report a fault</h1><p class="sub">Loading device...</p>';
   const r=await sb.rpc('get_device_public',{p_id:id});
@@ -780,7 +783,8 @@ async function renderPublic(id){
   const d=r.data&&r.data[0];
   if(!d){app.innerHTML='<h1>Report a fault</h1><div class="empty">This device was not found, or it has been retired. Check the label and try again.</div>';return;}
   const isOpen=!!d.fault_stage;
-  app.innerHTML='<h1>Report a fault</h1><div class="hero" style="--c:'+(isOpen?'var(--bad)':'var(--ok)')+';margin-top:12px"><div class="band"><span>'+(isOpen?'Fault reported':'Working')+'</span><span>'+esc(d.id)+'</span></div><div class="body"><h3 style="font-size:20px">'+esc(d.name)+'</h3><div class="id">'+esc(d.ward)+(d.critical?' · Critical equipment':'')+'</div></div></div>'+
+  const staleQr=qrMeta&&qrMeta.qrDept&&String(qrMeta.qrDept).trim().toLowerCase()!==String(d.ward||'').trim().toLowerCase();
+  app.innerHTML='<h1>Report a fault</h1>'+(staleQr?'<div class="fault"><b>QR label may be out of date.</b><p>The label identifies '+esc(qrMeta.qrDept)+', but the current register lists '+esc(d.ward)+'. Please confirm this is the correct asset before submitting a fault report.</p></div>':'')+<div class="hero" style="--c:'+(isOpen?'var(--bad)':'var(--ok)')+';margin-top:12px"><div class="band"><span>'+(isOpen?'Fault reported':'Working')+'</span><span>'+esc(d.id)+'</span></div><div class="body"><h3 style="font-size:20px">'+esc(d.name)+'</h3><div class="id">'+esc(d.ward)+(d.critical?' · Critical equipment':'')+'</div></div></div>'+
   (isOpen?'<div class="fault"><h3>Already being handled</h3><p>A fault on this device was reported on '+fmt(d.fault_since)+'. Current status: '+esc(d.fault_stage)+'. No need to report it again.</p></div>':
   '<form id="pubForm"><label class="f">What is wrong?<textarea name="desc" required maxlength="1000" placeholder="e.g. Screen blank, alarm sounding, no power"></textarea></label>'+
   '<label class="f">Priority<select name="priority"><option value="Normal">Normal</option><option value="Urgent">Urgent - patient care affected</option></select></label>'+
@@ -958,14 +962,14 @@ function render(){
   const q={};if(qi>=0)raw.slice(qi+1).split('&').forEach(p=>{const kv=p.split('=');q[kv[0]]=decodeURIComponent(kv[1]||'');});
   const p=path.split('/').filter(Boolean);
   const navEl=$('nav.bar');
-  if(p[0]==='r'){navEl.style.display='none';renderPublic(decodeURIComponent(p[1]||'').toUpperCase());return;}
+  if(p[0]==='r'){navEl.style.display='none';renderPublic(decodeURIComponent(p[1]||'').toUpperCase(),q);return;}
   if(!session){navEl.style.display='none';$('#app').innerHTML=viewLogin();bindLogin();return;}
   navEl.style.display='';
   if(!loaded){$('#app').innerHTML='<h1>Loading...</h1>';return;}
   let h,nav='today';
   switch(p[0]){
     case 'devices':nav='devices';h=viewDevices(q);break;
-    case 'd':nav='devices';h=viewDevice(decodeURIComponent(p[1]||''));break;
+    case 'd':nav='devices';h=viewDevice(decodeURIComponent(p[1]||''),q);break;
     case 'label':nav='devices';h=viewLabel(decodeURIComponent(p[1]||''));break;
     case 'labels':nav='devices';h=viewLabels();break;
     case 'scan':nav='scan';h=viewScan();break;
@@ -1021,7 +1025,7 @@ document.addEventListener('click',async e=>{
     case 'stage':stageForm(S.faults.find(f=>f.id===id));break;
     case 'resolve':resolveForm(S.faults.find(f=>f.id===id));break;
     case 'retire':{const d=dev(id);await run(sb.from('devices').update({retired:!d.retired}).eq('id',id),d.retired?'Back in use':'Device retired');break;}
-    case 'delete':if(confirm('Delete this device and all its fault and service history? This cannot be undone.')){if(await run(sb.from('devices').delete().eq('id',id),'Device deleted'))location.hash='#/devices';}break;
+    case 'delete':toast('Permanent deletion is disabled. Retire the asset to preserve its history.');break;
     case 'print':try{window.print();}catch(x){toast('Printing is not available here. Take a screenshot instead.');}break;
     case 'pickReport':{
       const act=S.devices.filter(d=>!d.retired);
