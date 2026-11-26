@@ -1,54 +1,66 @@
-const V = 'eq-v5';
+const V = 'eq-v6';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
-self.addEventListener('install', e => {
-  self.skipWaiting();
-  e.waitUntil(caches.open(V).then(c => Promise.all(SHELL.map(u => c.add(u).catch(() => {})))));
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(V).then(cache =>
+      Promise.all(SHELL.map(url => cache.add(url).catch(() => {})))
+    )
+  );
 });
 
-self.addEventListener('activate', e => {
-  e.waitUntil(
+// Activate a waiting update only after the user selects "Update now".
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== V).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(key => key !== V).map(key => caches.delete(key))))
       .then(() => self.clients.claim())
   );
 });
 
-self.addEventListener('fetch', e => {
-  const req = e.request;
-  if (req.method !== 'GET') return;
-  const url = new URL(req.url);
+self.addEventListener('fetch', event => {
+  const request = event.request;
+  if (request.method !== 'GET') return;
+  const url = new URL(request.url);
 
-  // Never cache live data
+  // Never cache live data or API responses.
   if (url.hostname.endsWith('supabase.co')) return;
 
-  // The app page: always try the network first so updates arrive, fall back to the saved copy offline
-  if (req.mode === 'navigate' || (url.origin === location.origin && (url.pathname.endsWith('/') || url.pathname.endsWith('index.html')))) {
-    e.respondWith(
-      fetch(req)
-        .then(res => {
-          const copy = res.clone();
-          caches.open(V).then(c => c.put('./index.html', copy));
-          return res;
+  // Always check the network for the app shell; use the cached shell only offline.
+  if (request.mode === 'navigate' ||
+      (url.origin === self.location.origin &&
+       (url.pathname.endsWith('/') || url.pathname.endsWith('/index.html')))) {
+    event.respondWith(
+      fetch(request)
+        .then(response => {
+          if (response && response.ok) {
+            const copy = response.clone();
+            caches.open(V).then(cache => cache.put('./index.html', copy));
+          }
+          return response;
         })
-        .catch(() => caches.match('./index.html').then(r => r || caches.match('./')))
+        .catch(() => caches.match('./index.html').then(cached => cached || caches.match('./')))
     );
     return;
   }
 
-  // Everything else (libraries, fonts, icons): use the saved copy, refresh it in the background
-  e.respondWith(
-    caches.match(req).then(cached => {
-      const net = fetch(req)
-        .then(res => {
-          if (res && (res.ok || res.type === 'opaque')) {
-            const copy = res.clone();
-            caches.open(V).then(c => c.put(req, copy));
+  // Other static resources are cache-first and refreshed when online.
+  event.respondWith(
+    caches.match(request).then(cached => {
+      const network = fetch(request)
+        .then(response => {
+          if (response && (response.ok || response.type === 'opaque')) {
+            const copy = response.clone();
+            caches.open(V).then(cache => cache.put(request, copy));
           }
-          return res;
+          return response;
         })
         .catch(() => cached);
-      return cached || net;
+      return cached || network;
     })
   );
 });
