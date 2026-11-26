@@ -108,11 +108,11 @@ create policy assets_department_officer_update on public.assets
   for update to authenticated
   using (
     public.has_app_role(array['department_officer'])
-    and public.is_department_member(department_id)
+    and public.is_department_asset_officer(department_id)
   )
   with check (
     public.has_app_role(array['department_officer'])
-    and public.is_department_member(department_id)
+    and public.is_department_asset_officer(department_id)
   );
 
 -- Documents follow the access rights of their parent asset.
@@ -148,7 +148,7 @@ create policy asset_documents_department_officer_update on public.asset_document
     and exists (
       select 1 from public.assets a
       where a.id = asset_documents.asset_id
-        and public.is_department_member(a.department_id)
+        and public.is_department_asset_officer(a.department_id)
     )
   )
   with check (
@@ -156,7 +156,7 @@ create policy asset_documents_department_officer_update on public.asset_document
     and exists (
       select 1 from public.assets a
       where a.id = asset_documents.asset_id
-        and public.is_department_member(a.department_id)
+        and public.is_department_asset_officer(a.department_id)
     )
   );
 
