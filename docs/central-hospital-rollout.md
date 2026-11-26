@@ -3,6 +3,7 @@
 ## Scope delivered in this branch
 
 - Adds a hospital location directory for wards and departments.
+- Adds a read-only canonical asset register screen with database-side search, status/department/category filters and server-side pagination (25/50/100 rows).
 - Seeds the eight initial locations agreed for Central Hospital.
 - Adds a generator register as a specialist module linked to the universal asset register by a canonical asset identity.
 - Adds individual generator profiles, basic refuelling records, service history and breakdown history.
@@ -112,7 +113,8 @@ References:
 
 ## Validation checklist before enabling hospital-wide use
 
-- [ ] Apply the migration to a backed-up Supabase project.
+- [ ] Apply migrations 001–004 to a restored staging copy first; do not apply directly to production.
+- [ ] Verify the paginated canonical register returns accurate counts and page boundaries with a synthetic 10,000-row dataset.
 - [ ] Assign the first admin and at least one biomedical account.
 - [ ] Confirm viewer accounts can read but cannot write to the new modules.
 - [ ] Confirm unauthorised accounts cannot read or write the new modules.
@@ -120,6 +122,7 @@ References:
 - [ ] Register both generators from their physical nameplates; do not copy unverified reference values into the actual records.
 - [ ] Test a generator edit, refuelling entry, service entry and breakdown entry.
 - [ ] Verify each generator's history remains separate.
+- [ ] Verify the asset audit triggers record create/update/transfer events and do not permit unauthorised audit-row mutation.
 - [ ] Verify existing equipment registration, QR fault reporting, audits, imports, exports and offline reporting still work.
 - [ ] Verify new QR labels contain the department name and, when configured, department directory ID.
 - [ ] Transfer a test device and confirm its old QR label displays a stale-location warning; print and test the replacement label.
