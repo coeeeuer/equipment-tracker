@@ -18,7 +18,7 @@ returns text
 language sql
 stable
 security definer
-set search_path = public, auth
+set search_path = ''
 as $$
   select role from public.app_user_roles where user_id = auth.uid()
 $$;
@@ -28,7 +28,7 @@ returns boolean
 language sql
 stable
 security definer
-set search_path = public, auth
+set search_path = ''
 as $$
   select coalesce(public.current_app_role() = any(allowed_roles), false)
 $$;
