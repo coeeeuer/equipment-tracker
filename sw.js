@@ -1,4 +1,4 @@
-const V = 'eq-v3';
+const V = 'eq-v4';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
