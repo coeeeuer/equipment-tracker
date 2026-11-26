@@ -434,12 +434,9 @@ async function fetchAssetRegister(){
   }
 }
 function viewAssets(){
-  if(!assetRegister.ready&&!assetRegister.loading){
-    fetchAssetRegister();
-    return '<h1>Hospital asset register</h1><p class="sub">Loading one page of canonical asset records...</p>';
-  }
-  if(assetRegister.loading)return '<h1>Hospital asset register</h1><p class="sub">Loading...</p>';
   if(assetRegister.error)return '<div class="top"><a class="back" href="#/more">‹ Account</a></div><h1>Hospital asset register</h1><div class="fault"><b>Register unavailable</b><p>'+esc(assetRegister.error)+'</p><p class="small">This register requires the Batch 1 database foundation to be installed and verified on staging. The existing equipment register remains separate and unchanged.</p><button class="btn" data-act="assetRetry">Try again</button></div>';
+  if(!assetRegister.ready&&!assetRegister.loading){fetchAssetRegister();return '<h1>Hospital asset register</h1><p class="sub">Loading one page of canonical asset records...</p>';}
+  if(assetRegister.loading)return '<h1>Hospital asset register</h1><p class="sub">Loading...</p>';
   const start=assetRegister.total?assetRegister.page*assetRegister.pageSize+1:0;
   const end=Math.min(assetRegister.total,(assetRegister.page+1)*assetRegister.pageSize);
   const dmap=Object.fromEntries(assetRegister.departments.map(x=>[x.id,x.name]));
@@ -1128,8 +1125,8 @@ window.addEventListener('hashchange',()=>{closeSheet();render();window.scrollTo(
 /* ---------- boot ---------- */
 sb.auth.onAuthStateChange(async (ev,s)=>{
   const was=!!session;session=s;
-  if(session&&!was){await loadAll();render();}
-  else if(!session&&was){S={devices:[],faults:[],services:[],audits:[],locations:[],generators:[],generatorFuelLogs:[],generatorMaintenance:[],generatorFaults:[]};appRole=null;modulesReady=false;loaded=false;render();}
+  if(session&&!was){assetRegister={rows:[],total:0,page:0,pageSize:25,search:'',status:'all',department:'all',category:'all',departments:[],categories:[],ready:false,loading:false,error:''};await loadAll();render();}
+  else if(!session&&was){S={devices:[],faults:[],services:[],audits:[],locations:[],generators:[],generatorFuelLogs:[],generatorMaintenance:[],generatorFaults:[]};assetRegister={rows:[],total:0,page:0,pageSize:25,search:'',status:'all',department:'all',category:'all',departments:[],categories:[],ready:false,loading:false,error:''};appRole=null;modulesReady=false;loaded=false;render();}
 });
 if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
 (async function init(){
