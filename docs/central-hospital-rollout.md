@@ -8,7 +8,7 @@
 - Adds a generator register as a specialist module linked to the universal asset register by a canonical asset identity.
 - Adds individual generator profiles, basic refuelling records, service history and breakdown history.
 - Adds application roles for `admin`, `biomedical` and `viewer` on the new hospital modules.
-- Keeps existing `devices.ward` values as text for backward compatibility. Existing equipment, fault, service and audit tables are not altered by the migration.
+- Keeps existing `devices.ward` values as text for backward compatibility. Existing device and history rows are preserved; migration 007 adds nullable canonical `asset_id` links to faults/services while retaining legacy `device_id` values.
 - Adds department-aware QR payloads while retaining support for legacy `EQ-…` labels.
 - Flags QR labels whose encoded department no longer matches the current device record.
 - Disables permanent device deletion in the interface; assets should be retired so their history remains available.
@@ -131,7 +131,7 @@ References:
 
 ## Validation checklist before enabling hospital-wide use
 
-- [ ] Apply migrations 001–004 to a restored staging copy first; do not apply directly to production.
+- [ ] Apply migrations 001–007 to a restored staging copy first; do not apply directly to production.
 - [ ] Verify the paginated canonical register returns accurate counts and page boundaries with a synthetic 10,000-row dataset.
 - [ ] Assign the first admin and at least one biomedical account.
 - [ ] Confirm viewer accounts can read but cannot write to the new modules.
