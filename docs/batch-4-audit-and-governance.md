@@ -27,7 +27,7 @@ The migration does not change the old `audits` table or retrofit auditing onto l
 
 ## Security limitations still requiring implementation/verification
 
-The first foundation migration currently grants authenticated users read access to canonical asset records and reserves writes to the central `admin` and `biomedical` roles. Department-specific membership and least-privilege row policies are not yet active. The existing legacy equipment module has separate, pre-existing policies that must be reviewed independently.
+Migration 005 adds department membership and least-privilege row policies for canonical assets, documents, relationships and transfer visibility. These policies are prepared but have not been executed or permission-tested against a real staging database. The existing legacy equipment module has separate, pre-existing policies that must be reviewed independently.
 
 Do not enable department staff accounts until the role and membership model has been implemented, reviewed and tested on staging. Do not treat the current UI's role checks as a security boundary; Supabase RLS is the enforcement layer.
 
