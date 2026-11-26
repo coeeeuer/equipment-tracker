@@ -57,4 +57,4 @@ Use synthetic, non-patient data only.
 
 ## Current status
 
-The repository now includes a CI workflow that checks the inline JavaScript syntax and flags potentially destructive table operations in migration SQL. A workflow definition has been committed, but no successful GitHub Actions run has yet been confirmed. No database load test, concurrent-user test, backup restore test or end-to-end browser test has been run in this environment.
+The repository includes a CI workflow that extracts the inline application script and runs `node --check`, then scans migration SQL for `DROP TABLE`, `TRUNCATE` and `DELETE FROM`. A GitHub Actions run on the branch completed successfully for the then-current source and migrations 001–005. Migration 006 was added afterward; its file passed the same static destructive-operation scan during the latest repository review, but it has not yet been included in a confirmed CI run. No database load test, concurrent-user test, backup restore test or end-to-end browser test has been run in this environment.
