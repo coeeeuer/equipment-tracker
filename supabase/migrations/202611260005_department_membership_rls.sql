@@ -219,8 +219,6 @@ for each row execute function public.enforce_asset_location_department();
 
 -- A maintenance user may see the assets in their assigned departments but cannot
 -- edit the canonical identity, ownership, department or audit records.
-commit;
-
 -- Staging permission tests:
 -- admin/biomedical/viewer: can read all hospital assets.
 -- department_officer: can read and create/update only assets in active assigned departments.
@@ -263,3 +261,20 @@ drop policy if exists "Authenticated users read generator faults" on public.gene
 create policy "Central roles read generator faults" on public.generator_faults
   for select to authenticated
   using (public.has_app_role(array['admin','biomedical','viewer']));
+
+
+-- Department directory and category reads require an assigned application role.
+drop policy if exists departments_read_authenticated on public.departments;
+create policy departments_read_roles on public.departments
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer','department_officer','maintenance']));
+drop policy if exists locations_read_authenticated on public.locations;
+create policy locations_read_roles on public.locations
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer','department_officer','maintenance']));
+drop policy if exists asset_categories_read_authenticated on public.asset_categories;
+create policy asset_categories_read_roles on public.asset_categories
+  for select to authenticated
+  using (public.has_app_role(array['admin','biomedical','viewer','department_officer','maintenance']));
+
+commit;
