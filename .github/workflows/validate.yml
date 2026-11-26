@@ -22,7 +22,7 @@ jobs:
           from pathlib import Path
           import re
           html = Path("index.html").read_text(encoding="utf-8")
-          scripts = re.findall(r"<script(?![^>]*\\bsrc=)[^>]*>(.*?)</script>", html, re.I | re.S)
+          scripts = re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", html, re.I | re.S)
           if not scripts:
               raise SystemExit("No inline application script found")
           Path("/tmp/equipment-tracker-app.js").write_text(scripts[-1], encoding="utf-8")
@@ -38,7 +38,7 @@ jobs:
           files = sorted(Path("supabase/migrations").glob("*.sql"))
           if not files:
               raise SystemExit("No SQL migrations found")
-          forbidden = re.compile(r"\\b(drop\\s+table|truncate\\s+(?:table\\s+)?|delete\\s+from)\\b", re.I)
+          forbidden = re.compile(r"\b(drop\s+table|truncate\s+(?:table\s+)?|delete\s+from)\b", re.I)
           failures = []
           for path in files:
               sql = path.read_text(encoding="utf-8")
