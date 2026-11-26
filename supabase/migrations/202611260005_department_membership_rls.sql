@@ -191,6 +191,7 @@ create or replace function public.enforce_asset_location_department()
 returns trigger
 language plpgsql
 set search_path = ''
+
 as $
 declare
   v_location_department uuid;
