@@ -22,7 +22,7 @@ Therefore the application has **not** yet been verified for 10,000 live assets o
 Use synthetic, non-patient data only.
 
 1. Restore a current database backup to an isolated staging project.
-2. Apply reviewed migrations 001–004 in order.
+2. Apply reviewed migrations 001–007 in order.
 3. Load 10,000 synthetic assets distributed across the nine initial categories and the active departments; include accessories and assets with unknown or missing status.
 4. Add realistic synthetic faults, service history and transfer events.
 5. Verify that a 25-row page returns at most 25 asset rows and that next/previous navigation does not skip or duplicate rows.
