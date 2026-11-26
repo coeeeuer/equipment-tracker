@@ -40,14 +40,29 @@ set role = excluded.role, updated_at = now();
 
 Department memberships should be created only by admin/Biomedical after the user and department have been verified. The department membership migration is a database foundation; the app does not yet provide a staff membership administration screen.
 
-## Role behaviour for the new modules
+## Role behaviour
+
+### Existing locations and generator module
 
 | Role | View locations/generators | Register/edit locations and generators | Add fuel/service/breakdown records | Delete generator records |
 |---|---|---|---|---|
 | admin | Yes | Yes | Yes | Yes, via database policy |
 | biomedical | Yes | Yes | Yes | No |
 | viewer | Yes | No | No | No |
+| department_officer | No additional generator permissions | No | No | No |
+| maintenance | No additional generator permissions | No | No | No |
 | no role | No module access | No | No | No |
+
+### Canonical asset register after migration 005
+
+| Role | Asset visibility | Canonical asset changes |
+|---|---|---|
+| admin | All hospital assets | Full central oversight |
+| biomedical | All hospital assets | Full central oversight |
+| viewer | All hospital assets | Read-only |
+| department_officer | Active assigned departments only | Create/update only within an active asset-officer membership |
+| maintenance | Active assigned departments only | Read-only |
+| no role | No access | No access |
 
 The existing equipment module has its pre-existing permissions and policies; these migrations do not silently change them. Migration 005 scopes access to canonical assets, but the legacy equipment permissions remain a separate review item. The current canonical asset register UI is read-only; department-officer create/edit screens and membership administration are not yet implemented. Before hospital-wide production use, an administrator should review the existing RLS policies for `devices`, `faults`, `services`, `audits` and the public QR-report RPC. The new role model does not automatically retrofit security onto those existing tables.
 
