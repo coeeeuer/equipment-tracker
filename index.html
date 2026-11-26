@@ -312,7 +312,7 @@ function deviceForm(d){
     DL+field('Device name','name',{required:true,value:d.name,placeholder:'e.g. Patient monitor'})+
     field('Type','category',{list:'cats',value:d.category})+
     '<div class="two">'+field('Make and model','model',{value:d.model})+field('Serial number','serial',{value:d.serial})+'</div>'+
-    field('Ward or location','ward',{required:true,options:(S.locations.filter(x=>x.active).map(x=>[x.name,x.name]).concat(d.ward&&!S.locations.some(x=>x.name===d.ward)?[[d.ward,d.ward+' (existing)']]:[])),value:d.ward})+
+    (S.locations.length?field('Ward or location','ward',{required:true,options:(S.locations.filter(x=>x.active).map(x=>[x.name,x.name]).concat(d.ward&&!S.locations.some(x=>x.name===d.ward)?[[d.ward,d.ward+' (existing)']]:[])),value:d.ward}):field('Ward or location','ward',{required:true,list:'wards',value:d.ward}))+
     '<label class="f" style="display:flex;gap:10px;align-items:center"><input type="checkbox" name="critical" value="1" style="width:auto;margin:0;min-height:0"'+(d.critical?' checked':'')+'> Critical equipment (life support or emergency use)</label>'+
     '<div class="two">'+field('Service schedule','ppmDays',{value:d.ppmDays||0,options:[[0,'No schedule'],[30,'Every month'],[90,'Every 3 months'],[180,'Every 6 months'],[365,'Every year']]})+
     field('Last serviced','baseline',{type:'date',value:d.baseline||''})+'</div>'+
