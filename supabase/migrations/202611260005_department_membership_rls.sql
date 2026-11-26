@@ -160,6 +160,63 @@ create policy asset_documents_department_officer_update on public.asset_document
     )
   );
 
+-- Relationship visibility requires access to both linked assets.
+drop policy if exists asset_relationships_read_authenticated on public.asset_relationships;
+drop policy if exists asset_relationships_read_scoped on public.asset_relationships;
+create policy asset_relationships_read_scoped on public.asset_relationships
+  for select to authenticated
+  using (
+    exists (
+      select 1 from public.assets p
+      join public.assets c on c.id = asset_relationships.child_asset_id
+      where p.id = asset_relationships.parent_asset_id
+        and public.can_view_department(p.department_id)
+        and public.can_view_department(c.department_id)
+    )
+  );
+
+-- Transfer history is visible to central roles and to users assigned to either
+-- the source or destination department.
+drop policy if exists asset_transfers_read_authenticated on public.asset_transfers;
+drop policy if exists asset_transfers_read_scoped on public.asset_transfers;
+create policy asset_transfers_read_scoped on public.asset_transfers
+  for select to authenticated
+  using (
+    public.can_view_department(from_department_id)
+    or public.can_view_department(to_department_id)
+  );
+
+-- Keep physical placement consistent with the asset's organisational department.
+create or replace function public.enforce_asset_location_department()
+returns trigger
+language plpgsql
+set search_path = ''
+as $
+declare
+  v_location_department uuid;
+begin
+  if new.location_id is null then
+    return new;
+  end if;
+
+  select l.department_id
+    into v_location_department
+  from public.locations l
+  where l.id = new.location_id
+    and l.hospital_id = new.hospital_id;
+
+  if v_location_department is null or v_location_department is distinct from new.department_id then
+    raise exception 'Asset location must belong to the asset department';
+  end if;
+  return new;
+end;
+$;
+
+drop trigger if exists assets_validate_location_department on public.assets;
+create trigger assets_validate_location_department
+before insert or update of hospital_id, department_id, location_id on public.assets
+for each row execute function public.enforce_asset_location_department();
+
 -- A maintenance user may see the assets in their assigned departments but cannot
 -- edit the canonical identity, ownership, department or audit records.
 commit;
