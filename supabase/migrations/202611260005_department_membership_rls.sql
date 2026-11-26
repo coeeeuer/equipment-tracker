@@ -17,7 +17,7 @@ create table if not exists public.department_memberships (
   department_id uuid not null,
   user_id uuid not null references auth.users(id) on delete cascade,
   membership_role text not null
-    check (membership_role in ('asset_officer','maintenance','viewer')),
+    check (membership_role in ('asset_officer','maintenance')),
   active boolean not null default true,
   created_at timestamptz not null default now(),
   created_by uuid references auth.users(id) on delete set null,
