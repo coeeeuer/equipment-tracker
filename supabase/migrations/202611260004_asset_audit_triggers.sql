@@ -4,6 +4,9 @@
 
 begin;
 
+-- Audit entries are written by the SECURITY DEFINER triggers, not by browser clients.
+drop policy if exists asset_audit_logs_insert_authenticated on public.asset_audit_logs;
+
 create or replace function public.set_asset_updated_at()
 returns trigger
 language plpgsql
