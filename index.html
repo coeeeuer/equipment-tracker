@@ -481,7 +481,7 @@ function viewDevice(id,qrMeta){
 
 function viewLabel(id){
   const d=dev(id);if(!d)return viewDevice(id);
-  return '<div class="top"><a class="back" href="#/d/'+esc(d.id)+'">‹ '+esc(d.name)+'</a><button class="btn noprint" data-act="print">Print</button></div><div class="labelbig"><div class="qr">'+qrSvg(d.id)+'</div><b>'+esc(d.id)+'</b><div>'+esc(d.name)+'</div><div class="small" style="color:#555">'+esc(d.ward)+'</div></div><div class="note noprint">Staff scan this code with the phone camera to open the fault report form. Print it and stick it on the device.</div>';
+  return '<div class="top"><a class="back" href="#/d/'+esc(d.id)+'">‹ '+esc(d.name)+'</a><button class="btn noprint" data-act="print">Print</button></div><div class="labelbig"><div class="qr">'+qrSvg(d.id)+'</div><b>'+esc(d.id)+'</b><div>'+esc(d.name)+'</div><div class="small" style="color:#555">'+esc(d.ward)+'</div></div><div class="note noprint">The QR contains the device ID and department name (plus the directory ID when available). If the device moves to another department, update its record and print a fresh label. Staff can scan this code to open the fault report form.</div>';
 }
 function viewLabels(){
   if(!S.devices.length)return '<div class="top"><a class="back" href="#/devices">‹ Devices</a></div><div class="empty">Add devices first.</div>';
