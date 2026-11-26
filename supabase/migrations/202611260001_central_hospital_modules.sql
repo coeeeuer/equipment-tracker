@@ -30,7 +30,7 @@ stable
 security definer
 set search_path = ''
 as $$
-  select coalesce(public.current_app_role() = any(allowed_roles), false)
+  select auth.uid() is not null and coalesce(public.current_app_role() = any(allowed_roles), false)
 $$;
 
 alter table public.app_user_roles enable row level security;
@@ -225,6 +225,22 @@ create policy "Authorised staff update generator faults" on public.generator_fau
 drop policy if exists "Admins delete generator faults" on public.generator_faults;
 create policy "Admins delete generator faults" on public.generator_faults
   for delete to authenticated using (public.has_app_role(array['admin']));
+
+
+-- Explicit Data API grants: current Supabase projects no longer auto-expose new
+-- public-schema tables. RLS below remains the row-level security boundary.
+revoke all on public.app_user_roles, public.hospital_locations, public.generators,
+  public.generator_fuel_logs, public.generator_maintenance, public.generator_faults
+  from anon;
+grant select, insert, update, delete on public.app_user_roles,
+  public.hospital_locations, public.generators, public.generator_fuel_logs,
+  public.generator_maintenance, public.generator_faults to authenticated;
+
+-- Role-check helpers are only for authenticated RLS evaluation. The nested
+-- current_app_role helper is not an exposed RPC endpoint.
+revoke all on function public.current_app_role() from public, anon, authenticated;
+revoke all on function public.has_app_role(text[]) from public, anon;
+grant execute on function public.has_app_role(text[]) to authenticated;
 
 -- Bootstrap: after applying this migration, find the intended administrator's UUID
 -- in Supabase Authentication > Users, then run:
