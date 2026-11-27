@@ -31,11 +31,12 @@
 8. Apply `supabase/migrations/202611260006_asset_code_generation.sql` to staging. Test simultaneous inserts and verify no duplicate codes.
 9. Apply `supabase/migrations/202611260007_link_legacy_history.sql` to staging. Verify legacy fault/service counts and canonical asset links.
 10. Apply `supabase/migrations/202611260008_legacy_rpc_hardening.sql` to staging. Confirm public QR lookup and fault-report RPCs still work, while internal notification/digest functions cannot be called directly through the Data API.
-11. Apply `supabase/migrations/202611270001_asset_work_order_history.sql` to staging. Verify each work-order type, due-date fields, status changes and RLS boundaries.
-12. Apply `supabase/migrations/202611270002_capacity_search_indexes.sql` to staging. Confirm trigram and composite indexes exist and that search/filter query plans use appropriate indexes where the planner judges them beneficial.
-13. Run `supabase/tests/capacity_10000_assets.sql` on staging only. Record the three EXPLAIN ANALYZE timings and confirm exactly 10,000 synthetic assets were inserted before the transaction rolls back.
-14. Run `tests/load/asset-register.k6.js` against staging with a dedicated staging user token. The initial target is 50 concurrent readers for two minutes; treat the thresholds as targets to measure, not guaranteed performance.
-15. Only after all staging checks pass, the hospital's authorised administrator may decide whether to schedule a production migration. Production execution requires a fresh backup and explicit approval.
+11. Apply `supabase/migrations/202611260009_atomic_asset_transfer.sql` to staging. Verify transfer history and rollback behaviour.
+12. Apply `supabase/migrations/202611270001_asset_work_order_history.sql` to staging. Verify each work-order type, due-date fields, status changes and RLS boundaries.
+13. Apply `supabase/migrations/202611270002_capacity_search_indexes.sql` to staging. Confirm trigram and composite indexes exist and that search/filter query plans use appropriate indexes where the planner judges them beneficial.
+14. Run `supabase/tests/capacity_10000_assets.sql` on staging only. Record the three EXPLAIN ANALYZE timings and confirm exactly 10,000 synthetic assets were inserted before the transaction rolls back.
+15. Run `tests/load/asset-register.k6.js` against staging with a dedicated staging user token. The initial target is 50 concurrent readers for two minutes; treat the thresholds as targets to measure, not guaranteed performance.
+16. Only after all staging checks pass, the hospital's authorised administrator may decide whether to schedule a production migration. Production execution requires a fresh backup and explicit approval.
 
 The repository does not contain a Supabase service-role key, and the application must never receive one. The first administrator must be designated by the hospital and assigned using the Auth UUID from Supabase Authentication → Users. Do not share credentials or use a shared staff account.
 
