@@ -222,6 +222,7 @@ let S={devices:[],faults:[],services:[],audits:[],locations:[],generators:[],gen
 let session=null,loaded=false,loading=false,lastSig='',dataChanged=false;
 let appRole=null,modulesReady=false,modulesError='';
 let assetRegister={rows:[],total:0,page:0,pageSize:25,search:'',status:'all',department:'all',category:'all',departments:[],categories:[],ready:false,loading:false,error:''};
+let assetDetail={id:'',loading:false,data:null,department:'',location:'',workOrders:[],error:''};
 const canManageHospital=()=>appRole==='admin'||appRole==='biomedical';
 const canAdminHospital=()=>appRole==='admin';
 const dev=id=>S.devices.find(d=>d.id===id);
@@ -457,10 +458,72 @@ function viewAssets(){
   h+='<label class="f">Department<select id="assetDepartment"><option value="all">All departments</option>'+assetRegister.departments.map(x=>'<option value="'+esc(x.id)+'"'+(assetRegister.department===x.id?' selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select></label></div>';
   h+='<label class="f">Category<select id="assetCategory"><option value="all">All categories</option>'+assetRegister.categories.map(x=>'<option value="'+esc(x.id)+'"'+(assetRegister.category===x.id?' selected':'')+'>'+esc(x.name)+'</option>').join('')+'</select></label>';
   h+='<div class="list">';
-  h+=assetRegister.rows.length?assetRegister.rows.map(x=>'<div class="tag"><div class="t"><div><div class="n">'+esc(x.name)+(x.critical?' <span class="pill bad">Critical</span>':'')+'</div><div class="m">'+esc(x.asset_code)+' · '+esc(dmap[x.department_id]||'Department not assigned')+'</div></div><span class="pill">'+esc(String(x.operational_status||'unknown').replaceAll('_',' '))+'</span></div><div class="m">'+esc(cmap[x.category_id]||x.asset_kind||'Uncategorised')+(x.model?' · '+esc(x.model):'')+(x.serial_number?' · S/N '+esc(x.serial_number):'')+'</div>'+(x.physical_condition?'<div class="m">Condition: '+esc(x.physical_condition)+'</div>':'')+(canManageHospital()?'<div class="btnrow"><button class="btn" data-act="editAsset" data-id="'+esc(x.id)+'">Edit asset</button><button class="btn" data-act="transferAsset" data-id="'+esc(x.id)+'">Transfer</button></div>':'')+'</div>').join(''):'<div class="empty">No assets match these filters.</div>';
+  h+=assetRegister.rows.length?assetRegister.rows.map(x=>'<div class="tag"><div class="t"><div><div class="n">'+esc(x.name)+(x.critical?' <span class="pill bad">Critical</span>':'')+'</div><div class="m">'+esc(x.asset_code)+' · '+esc(dmap[x.department_id]||'Department not assigned')+'</div></div><span class="pill">'+esc(String(x.operational_status||'unknown').replaceAll('_',' '))+'</span></div><div class="m">'+esc(cmap[x.category_id]||x.asset_kind||'Uncategorised')+(x.model?' · '+esc(x.model):'')+(x.serial_number?' · S/N '+esc(x.serial_number):'')+'</div>'+(x.physical_condition?'<div class="m">Condition: '+esc(x.physical_condition)+'</div>':'')+'<div class="btnrow"><button class="btn primary" data-act="viewAsset" data-id="'+esc(x.id)+'">Asset details & history</button>'+(canManageHospital()?'<button class="btn" data-act="editAsset" data-id="'+esc(x.id)+'">Edit asset</button><button class="btn" data-act="transferAsset" data-id="'+esc(x.id)+'">Transfer</button>':'')+'</div></div>').join(''):'<div class="empty">No assets match these filters.</div>';
   h+='</div><div class="top" style="margin-top:16px"><span class="small muted">Showing '+start+'–'+end+' of '+assetRegister.total+'</span><div class="btnrow"><button class="btn" data-act="assetPrev"'+(assetRegister.page===0?' disabled':'')+'>Previous</button><button class="btn" data-act="assetNext"'+(end>=assetRegister.total?' disabled':'')+'>Next</button></div></div>';
   h+='<label class="f">Rows per page<select id="assetPageSize">'+[25,50,100].map(n=>'<option value="'+n+'"'+(assetRegister.pageSize===n?' selected':'')+'>'+n+'</option>').join('')+'</select></label>';
   return h;
+}
+
+/* ---------- canonical asset maintenance and work-order history ---------- */
+async function loadAssetDetail(id){
+  if(assetDetail.loading)return;
+  assetDetail={id,loading:true,data:null,department:'',location:'',workOrders:[],error:''};
+  try{
+    const a=await sb.from('assets').select('*').eq('id',id).single();
+    if(a.error)throw a.error;
+    const [orders,dep,loc]=await Promise.all([
+      sb.from('asset_work_orders').select('*').eq('asset_id',id).order('reported_at',{ascending:false}).limit(500),
+      a.data.department_id?sb.from('departments').select('name').eq('id',a.data.department_id).maybeSingle():Promise.resolve({data:null,error:null}),
+      a.data.location_id?sb.from('locations').select('name').eq('id',a.data.location_id).maybeSingle():Promise.resolve({data:null,error:null})
+    ]);
+    if(orders.error)throw orders.error;
+    if(dep.error)throw dep.error;
+    if(loc.error)throw loc.error;
+    assetDetail={id,loading:false,data:a.data,department:dep.data?.name||'Department not assigned',location:loc.data?.name||'Not specified',workOrders:orders.data||[],error:''};
+  }catch(e){
+    assetDetail={id,loading:false,data:null,department:'',location:'',workOrders:[],error:e?.message||'Could not load asset history.'};
+  }
+  if(location.hash==='#/asset/'+encodeURIComponent(id))render();
+}
+function viewAssetDetail(id){
+  if(assetDetail.id!==id||(!assetDetail.data&&!assetDetail.loading&&!assetDetail.error)){
+    loadAssetDetail(id);
+    return '<div class="top"><a class="back" href="#/assets">‹ Asset register</a></div><h1>Asset history</h1><p class="sub">Loading asset details and maintenance history…</p>';
+  }
+  if(assetDetail.loading)return '<div class="top"><a class="back" href="#/assets">‹ Asset register</a></div><h1>Asset history</h1><p class="sub">Loading…</p>';
+  if(assetDetail.error)return '<div class="top"><a class="back" href="#/assets">‹ Asset register</a></div><div class="fault"><b>Could not load asset history</b><p>'+esc(assetDetail.error)+'</p><button class="btn" data-act="assetDetailRetry" data-id="'+esc(id)+'">Try again</button></div>';
+  const a=assetDetail.data;
+  if(!a)return '<div class="empty">Asset not found.</div>';
+  let h='<div class="top"><a class="back" href="#/assets">‹ Asset register</a>'+(canManageHospital()?'<button class="btn" data-act="editAsset" data-id="'+esc(a.id)+'">Edit asset</button>':'')+'</div>';
+  h+='<div class="hero"><div class="band"><span>'+esc(String(a.operational_status||'unknown').replaceAll('_',' '))+'</span><span>'+esc(a.asset_code)+'</span></div><div class="body"><h1 style="font-size:24px">'+esc(a.name)+'</h1><div class="id">'+esc(assetDetail.department)+' · '+esc(assetDetail.location)+'</div><dl class="kv"><dt>Category / type</dt><dd>'+esc(a.asset_kind||'Equipment')+'</dd><dt>Manufacturer / model</dt><dd>'+esc([a.manufacturer,a.model].filter(Boolean).join(' ')||'Not recorded')+'</dd><dt>Serial number</dt><dd>'+esc(a.serial_number||'Not recorded')+'</dd><dt>Physical condition</dt><dd>'+esc(a.physical_condition||'Not recorded')+'</dd><dt>Warranty expiry</dt><dd>'+esc(a.warranty_until||'Not recorded')+'</dd></dl></div></div>';
+  if(canManageHospital())h+='<div class="actions"><button class="btn primary" data-act="newWorkOrder" data-id="'+esc(a.id)+'" data-type="fault">Report fault</button><button class="btn" data-act="newWorkOrder" data-id="'+esc(a.id)+'" data-type="preventive_maintenance">Log maintenance</button><button class="btn" data-act="newWorkOrder" data-id="'+esc(a.id)+'" data-type="calibration">Log calibration</button><button class="btn" data-act="newWorkOrder" data-id="'+esc(a.id)+'" data-type="safety_test">Log safety test</button></div>';
+  h+='<div class="sec"><h2>Maintenance and fault history <small>'+assetDetail.workOrders.length+' records</small></h2>';
+  if(!assetDetail.workOrders.length)h+='<div class="empty">No work orders or maintenance records have been recorded for this asset yet.</div>';
+  else h+='<div class="list">'+assetDetail.workOrders.map(w=>'<div class="tag"><div class="t"><div class="n">'+esc(String(w.work_order_type).replaceAll('_',' '))+'</div><span class="pill '+(w.status==='completed'?'ok':w.priority==='urgent'?'bad':'')+'">'+esc(w.status.replaceAll('_',' '))+'</span></div><div class="m">'+fmt(w.reported_at.slice(0,10))+' · '+esc(w.priority)+' priority</div><div class="d">'+esc(w.description)+'</div>'+(w.action_taken?'<div class="m">Action: '+esc(w.action_taken)+'</div>':'')+(w.parts_used?'<div class="m">Parts: '+esc(w.parts_used)+'</div>':'')+(w.performed_by?'<div class="m">Performed by: '+esc(w.performed_by)+'</div>':'')+(w.cost_ngn!=null?'<div class="m">Cost: '+naira(w.cost_ngn)+'</div>':'')+(w.next_due_date||w.next_due_hours!=null?'<div class="m">Next due: '+(w.next_due_date?fmt(w.next_due_date):'')+(w.next_due_hours!=null?' · '+esc(w.next_due_hours)+' hours':'')+'</div>':'')+(canManageHospital()?'<div class="btnrow"><button class="btn" data-act="editWorkOrder" data-id="'+esc(w.id)+'">Update record</button></div>':'')+'</div>').join('')+'</div>';
+  h+='</div><p class="small muted">This is the canonical asset history. Existing legacy device fault and service records remain preserved; their migration link is handled separately.</p>';
+  return h;
+}
+function assetWorkOrderForm(asset,record,type){
+  if(!canManageHospital()){toast('Your role cannot record or update asset work orders');return;}
+  const current=record||null,kind=current?.work_order_type||type||'fault';
+  const dateValue=(current?.reported_at||new Date().toISOString()).slice(0,16);
+  sheet(current?'Update asset work order':'New asset work order · '+asset.name,
+    field('Record type','work_order_type',{required:true,value:kind,options:[['fault','Fault report'],['repair','Repair'],['preventive_maintenance','Preventive maintenance'],['calibration','Calibration'],['safety_test','Electrical safety test'],['inspection','Inspection'],['other','Other']]})+
+    '<div class="two">'+field('Priority','priority',{value:current?.priority||'normal',options:[['low','Low'],['normal','Normal'],['high','High'],['urgent','Urgent']]})+field('Status','status',{value:current?.status||'open',options:[['open','Open'],['in_progress','In progress'],['awaiting_parts','Awaiting parts'],['completed','Completed'],['cancelled','Cancelled']]})+'</div>'+
+    field('Date reported / performed','reported_at',{type:'datetime-local',required:true,value:dateValue})+
+    field('Scheduled date','scheduled_for',{type:'date',value:current?.scheduled_for||''})+
+    field('Description / work required','description',{area:true,required:true,value:current?.description||'',placeholder:'Describe the fault, inspection or maintenance carried out.'})+
+    field('Action taken / work performed','action_taken',{area:true,value:current?.action_taken||''})+
+    field('Parts / consumables used','parts_used',{value:current?.parts_used||''})+
+    '<div class="two">'+field('Performed by','performed_by',{value:current?.performed_by||''})+field('External service provider','vendor',{value:current?.vendor||''})+'</div>'+
+    '<div class="two">'+field('Cost (₦)','cost_ngn',{type:'number',value:current?.cost_ngn??''})+field('Next due date','next_due_date',{type:'date',value:current?.next_due_date||''})+'</div>'+
+    field('Next due hour-meter reading','next_due_hours',{type:'number',value:current?.next_due_hours??''}),
+    async fd=>{
+      if(!fd.description.trim()){toast('Enter a description');return;}
+      const row={asset_id:asset.id,hospital_id:asset.hospital_id,work_order_type:fd.work_order_type,priority:fd.priority,status:fd.status,reported_at:new Date(fd.reported_at).toISOString(),scheduled_for:fd.scheduled_for||null,completed_at:fd.status==='completed'?(current?.completed_at||new Date(Math.max(Date.now(),new Date(fd.reported_at).getTime())).toISOString()):null,description:fd.description.trim(),action_taken:fd.action_taken||null,parts_used:fd.parts_used||null,performed_by:fd.performed_by||null,vendor:fd.vendor||null,cost_ngn:numOrNull(fd.cost_ngn),next_due_date:fd.next_due_date||null,next_due_hours:numOrNull(fd.next_due_hours)};
+      const q=current?sb.from('asset_work_orders').update(row).eq('id',current.id):sb.from('asset_work_orders').insert({...row,created_by:session.user.id});
+      if(await run(q,current?'Work order updated':'Work order recorded')){closeSheet();assetDetail.id='';loadAssetDetail(asset.id);}
+    },current?'Save changes':'Save record');
 }
 
 /* ---------- canonical asset registration and editing ---------- */
@@ -1129,6 +1192,7 @@ function render(){
   switch(p[0]){
     case 'devices':nav='devices';h=viewDevices(q);break;
     case 'assets':nav='more';h=viewAssets();break;
+    case 'asset':nav='more';h=viewAssetDetail(decodeURIComponent(p[1]||''));break;
     case 'd':nav='devices';h=viewDevice(decodeURIComponent(p[1]||''),q);break;
     case 'label':nav='devices';h=viewLabel(decodeURIComponent(p[1]||''));break;
     case 'labels':nav='devices';h=viewLabels();break;
@@ -1182,8 +1246,12 @@ document.addEventListener('click',async e=>{
     case 'filter':devFilter=t.dataset.v;render();break;
     case 'refresh':if(await loadAll()){render();toast('Up to date');}break;
     case 'assetRetry':assetRegister.ready=false;assetRegister.error='';render();break;
+    case 'viewAsset':location.hash='#/asset/'+encodeURIComponent(id);break;
+    case 'assetDetailRetry':assetDetail.id='';assetDetail.error='';render();break;
+    case 'newWorkOrder':{const a=assetDetail.data;if(a&&a.id===id)assetWorkOrderForm(a,null,t.dataset.type);break;}
+    case 'editWorkOrder':{const a=assetDetail.data,w=assetDetail.workOrders.find(x=>x.id===id);if(a&&w)assetWorkOrderForm(a,w);break;}
     case 'addAsset':assetForm();break;
-    case 'editAsset':{const row=assetRegister.rows.find(x=>x.id===id);if(row)assetForm(row);break;}
+    case 'editAsset':{const row=assetDetail.data&&assetDetail.data.id===id?assetDetail.data:assetRegister.rows.find(x=>x.id===id);if(row)assetForm(row);break;}
     case 'transferAsset':{const row=assetRegister.rows.find(x=>x.id===id);if(row){const dep=assetRegister.departments.find(x=>x.id===row.department_id);transferAssetForm({...row,department_name:dep?.name||''});}break;}
     case 'assetSearch':assetRegister.search=$('#assetSearch').value.trim();assetRegister.page=0;assetRegister.ready=false;render();break;
     case 'assetPrev':assetRegister.page=Math.max(0,assetRegister.page-1);assetRegister.ready=false;render();break;
