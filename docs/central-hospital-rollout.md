@@ -7,6 +7,8 @@
 - Seeds the eight initial locations agreed for Central Hospital.
 - Adds a generator register as a specialist module linked to the universal asset register by a canonical asset identity.
 - Adds canonical asset work-order history for faults, repairs, preventive maintenance, calibration, electrical safety tests and inspections, with status, priority, parts, costs, provider, performer and next-due fields. Asset details display this history and central admin/Biomedical users can create or update records.
+- Adds trigram indexes for the asset register's case-insensitive substring search and composite indexes for hospital/status/department/category list filters and maintenance due-date/audit lookups.
+- Keeps the asset register server-side paginated at 25 rows by default, with 50/100 options; filters and counts are queried from Postgres rather than downloading the full register.
 - Adds individual generator profiles, basic refuelling records, service history and breakdown history.
 - Adds application roles for `admin`, `biomedical` and `viewer` on the new hospital modules.
 - Keeps existing `devices.ward` values as text for backward compatibility. Existing device and history rows are preserved; migration 007 adds nullable canonical `asset_id` links to faults/services while retaining legacy `device_id` values.
@@ -29,7 +31,11 @@
 8. Apply `supabase/migrations/202611260006_asset_code_generation.sql` to staging. Test simultaneous inserts and verify no duplicate codes.
 9. Apply `supabase/migrations/202611260007_link_legacy_history.sql` to staging. Verify legacy fault/service counts and canonical asset links.
 10. Apply `supabase/migrations/202611260008_legacy_rpc_hardening.sql` to staging. Confirm public QR lookup and fault-report RPCs still work, while internal notification/digest functions cannot be called directly through the Data API.
-11. Only after the staging checks pass, the hospital's authorised administrator may decide whether to schedule a production migration. Production execution requires a fresh backup and explicit approval.
+11. Apply `supabase/migrations/202611270001_asset_work_order_history.sql` to staging. Verify each work-order type, due-date fields, status changes and RLS boundaries.
+12. Apply `supabase/migrations/202611270002_capacity_search_indexes.sql` to staging. Confirm trigram and composite indexes exist and that search/filter query plans use appropriate indexes where the planner judges them beneficial.
+13. Run `supabase/tests/capacity_10000_assets.sql` on staging only. Record the three EXPLAIN ANALYZE timings and confirm exactly 10,000 synthetic assets were inserted before the transaction rolls back.
+14. Run `tests/load/asset-register.k6.js` against staging with a dedicated staging user token. The initial target is 50 concurrent readers for two minutes; treat the thresholds as targets to measure, not guaranteed performance.
+15. Only after all staging checks pass, the hospital's authorised administrator may decide whether to schedule a production migration. Production execution requires a fresh backup and explicit approval.
 
 The repository does not contain a Supabase service-role key, and the application must never receive one. The first administrator must be designated by the hospital and assigned using the Auth UUID from Supabase Authentication → Users. Do not share credentials or use a shared staff account.
 
@@ -175,3 +181,16 @@ The repository now contains migration `202611270001_asset_work_order_history.sql
 For now, creation and updates are restricted to the central `admin` and `biomedical` roles. This is deliberate: department-officer and maintenance-role write permissions remain unconfigured until the HOD discussion. View access follows the existing department-scoped canonical asset policy. The new migration is additive and does not rewrite or delete the legacy `faults` or `services` tables. Their history-linking migration remains a separate rollout step.
 
 This is a repository change only. The new migration has not been applied to the live Supabase database, and the new screens will not become operational until the complete migration sequence is safely tested and approved for rollout.
+
+
+## Capacity and reliability update
+
+Migration `202611270002_capacity_search_indexes.sql` enables the `pg_trgm` extension in the `extensions` schema and adds trigram indexes for name, asset code, model and serial number. These align with the current application's `ILIKE '%term%'` search. Composite indexes support common hospital/status/department/category list filters, while additional indexes support maintenance due-date and audit-history lookups. The existing full-text search index and unique asset-code constraint remain in place.
+
+The asset register already performs database-side filtering and server-side pagination. It requests only the selected page, defaults to 25 rows, and offers 50/100 rows per page. This work strengthens database indexing rather than downloading thousands of assets to the browser.
+
+Two staging-only test assets are included:
+- `supabase/tests/capacity_10000_assets.sql`: creates 10,000 synthetic assets, captures query plans/timings for a paginated list, a department/status filter and substring search, verifies the count, then rolls the transaction back.
+- `tests/load/asset-register.k6.js`: optional 50-virtual-user, two-minute read-load test. It requires a dedicated staging URL, publishable/anon key and staging-user access token. It must never be pointed at production or supplied a service-role key.
+
+These are test harnesses, not proof that 10,000 assets or 50 concurrent users have already been load-tested. The current Supabase project has no hospital foundation tables installed, and no paid staging branch was created. Run the test scripts only after an isolated staging database is available and the migration sequence has been installed there.
