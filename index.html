@@ -1251,7 +1251,7 @@ document.addEventListener('click',async e=>{
     case 'newWorkOrder':{const a=assetDetail.data;if(a&&a.id===id)assetWorkOrderForm(a,null,t.dataset.type);break;}
     case 'editWorkOrder':{const a=assetDetail.data,w=assetDetail.workOrders.find(x=>x.id===id);if(a&&w)assetWorkOrderForm(a,w);break;}
     case 'addAsset':assetForm();break;
-    case 'editAsset':{const row=assetRegister.rows.find(x=>x.id===id);if(row)assetForm(row);break;}
+    case 'editAsset':{const row=assetDetail.data&&assetDetail.data.id===id?assetDetail.data:assetRegister.rows.find(x=>x.id===id);if(row)assetForm(row);break;}
     case 'transferAsset':{const row=assetRegister.rows.find(x=>x.id===id);if(row){const dep=assetRegister.departments.find(x=>x.id===row.department_id);transferAssetForm({...row,department_name:dep?.name||''});}break;}
     case 'assetSearch':assetRegister.search=$('#assetSearch').value.trim();assetRegister.page=0;assetRegister.ready=false;render();break;
     case 'assetPrev':assetRegister.page=Math.max(0,assetRegister.page-1);assetRegister.ready=false;render();break;
