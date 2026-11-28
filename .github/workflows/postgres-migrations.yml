@@ -102,7 +102,17 @@ jobs:
             v_result := public.report_asset_fault(v_asset, 'Duplicate CI fault', 'Normal', null);
             if v_result <> 'duplicate' then raise exception 'Duplicate guard returned %', v_result; end if;
           end $$;
-          select has_function_privilege('anon', 'public.get_asset_public(uuid)', 'EXECUTE');
-          select has_function_privilege('anon', 'public.report_asset_fault(uuid,text,text,text)', 'EXECUTE');
-          select has_table_privilege('anon', 'public.assets', 'SELECT');
+          do $
+          begin
+            if not has_function_privilege('anon', 'public.get_asset_public(uuid)', 'EXECUTE')
+              or not has_function_privilege('anon', 'public.report_asset_fault(uuid,text,text,text)', 'EXECUTE') then
+              raise exception 'Anonymous QR RPC grants are missing';
+            end if;
+            if has_table_privilege('anon', 'public.assets', 'SELECT') then
+              raise exception 'Anonymous users must not have direct asset table access';
+            end if;
+          end $;
           SQL
+      - name: Run 10,000-asset capacity smoke test (transaction rolls back)
+        run: |
+          psql -v ON_ERROR_STOP=1 -f supabase/tests/capacity_10000_assets.sql
