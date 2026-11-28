@@ -12,14 +12,16 @@
 - Adds individual generator profiles, basic refuelling records, service history and breakdown history.
 - Adds application roles for `admin`, `biomedical` and `viewer` on the new hospital modules.
 - Keeps existing `devices.ward` values as text for backward compatibility. Existing device and history rows are preserved; migration 007 adds nullable canonical `asset_id` links to faults/services while retaining legacy `device_id` values.
-- Adds department-aware QR payloads while retaining support for legacy `EQ-…` labels.
-- Flags QR labels whose encoded department no longer matches the current device record.
+- Retains backward-compatible public QR lookup and reporting for legacy `EQ-…` device labels.
+- Adds QR labels for canonical hospital assets. Version 3 labels encode the immutable asset UUID, current department UUID and department name; scanning opens a public fault-report page.
+- Public QR pages compare both the encoded department UUID and department name with the current database record and flag stale labels after transfers.
+- Ward staff do not need accounts: they scan and submit fault reports. The HOD-approved access model uses one shared Biomedical Engineering login; individual engineer attribution is therefore not available, while record history and timestamps remain available.
 - Disables permanent device deletion in the interface; assets should be retired so their history remains available.
 - Bumps the service-worker cache version so installed app copies can receive the new interface.
 
 ## Important: database migration required
 
-**Do not run these migrations against production yet.** The original schema for the legacy `devices`, `faults`, `services` and `audits` tables has not been independently verified. Apply the sequence below only to a restored staging copy first.
+**Do not run these migrations against production yet.** The legacy table definitions have now been inspected in the live project, but populated-data migration and full workflow verification still require a restored staging copy. Apply the sequence below only to staging first.
 
 1. Take a current Supabase backup and prove it can be restored to an isolated staging project.
 2. Review the actual legacy table definitions, foreign keys, triggers, indexes and RLS policies against the assumptions in `docs/batch-2-compatibility-review.md`.
@@ -27,7 +29,7 @@
 4. Apply `supabase/migrations/202611260002_hospital_asset_foundation.sql` to staging. Compare legacy device counts with copied asset counts and resolve every unmapped department before proceeding.
 5. Apply `supabase/migrations/202611260003_link_generators_to_assets.sql` to staging. Confirm every generator profile links to exactly one canonical asset.
 6. Apply `supabase/migrations/202611260004_asset_audit_triggers.sql` to staging. Verify create/update/transfer audit events and transaction rollback behaviour.
-7. Apply `supabase/migrations/202611260005_department_membership_rls.sql` to staging. Test role and department access using separate test accounts.
+7. Apply `supabase/migrations/202611260005_department_membership_rls.sql` to staging. Test the single `biomedical` login can manage the register, confirm a no-role session cannot access internal modules, and confirm anonymous users can access only the intended QR reporting functions.
 8. Apply `supabase/migrations/202611260006_asset_code_generation.sql` to staging. Test simultaneous inserts and verify no duplicate codes.
 9. Apply `supabase/migrations/202611260007_link_legacy_history.sql` to staging. Verify legacy fault/service counts and canonical asset links.
 10. Apply `supabase/migrations/202611260008_legacy_rpc_hardening.sql` to staging. Confirm public QR lookup and fault-report RPCs still work, while internal notification/digest functions cannot be called directly through the Data API.
@@ -35,10 +37,11 @@
 12. Apply `supabase/migrations/202611270001_asset_work_order_history.sql` to staging. Verify each work-order type, due-date fields, status changes and RLS boundaries.
 13. Apply `supabase/migrations/202611270002_capacity_search_indexes.sql` to staging. Confirm trigram and composite indexes exist and that search/filter query plans use appropriate indexes where the planner judges them beneficial.
 14. Run `supabase/tests/capacity_10000_assets.sql` on staging only. Record the three EXPLAIN ANALYZE timings and confirm exactly 10,000 synthetic assets were inserted before the transaction rolls back.
-15. Run `tests/load/asset-register.k6.js` against staging with a dedicated staging user token. The initial target is 50 concurrent readers for two minutes; treat the thresholds as targets to measure, not guaranteed performance.
-16. Only after all staging checks pass, the hospital's authorised administrator may decide whether to schedule a production migration. Production execution requires a fresh backup and explicit approval.
+15. Apply `supabase/migrations/202611280001_public_asset_qr_reporting.sql` to staging. Verify legacy QR lookup returns the current department UUID, canonical asset labels encode asset and department identity, public fault reports create one canonical work order, duplicate reports are rejected, and stale department IDs are flagged.
+16. Run `tests/load/asset-register.k6.js` against staging with a dedicated staging user token. The initial target is 50 concurrent readers for two minutes; treat the thresholds as targets to measure, not guaranteed performance.
+17. Only after all staging checks pass, the hospital's authorised administrator may decide whether to schedule a production migration. Production execution requires a fresh backup and explicit approval.
 
-The repository does not contain a Supabase service-role key, and the application must never receive one. The first administrator must be designated by the hospital and assigned using the Auth UUID from Supabase Authentication → Users. Do not share credentials or use a shared staff account.
+The repository does not contain a Supabase service-role key, and the application must never receive one. For this rollout, the HOD has approved one shared Biomedical Engineering departmental login. Assign the existing authorised Auth user the `biomedical` role. No ward logins or separate engineer accounts are to be created unless the HOD changes this decision. A shared login cannot identify which individual engineer performed an action.
 
 Example central Biomedical role assignment (replace the UUID with the real Auth user UUID):
 

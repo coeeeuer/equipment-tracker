@@ -28,11 +28,11 @@ This is a compatibility bridge, not yet a complete application migration. In par
 
 ## Why the application migration is gated
 
-The repository branch does not contain the original database-creation migration for `devices`, `faults`, `services` and `audits`. The current JavaScript shows which columns it expects, but does not prove their database types, nullability, defaults, foreign keys, delete behaviour, RLS policies or any triggers/RPC dependencies.
+The repository does not contain the original database-creation migration for `devices`, `faults`, `services` and `audits`. The live production schema was therefore inspected directly on 2026-11-28. The expected `devices` columns exist with compatible types: `id` is text with the `EQ-` sequence default; `name` and `ward` are non-null text; `model` and `serial` are nullable text; `critical` is boolean; warranty and added dates are date; replacement cost is numeric; and vendor fields are text. `faults.device_id` and `services.device_id` are text foreign keys to `devices.id` with `ON DELETE CASCADE`. Their primary keys and device-history indexes exist. The existing `faults_notify` trigger and public QR lookup/report functions were also identified.
 
-The Batch 1 backfill currently assumes these `devices` columns exist with compatible types: `id`, `name`, `model`, `serial`, `ward`, `critical`, `replacement_cost`, `warranty_until`, `vendor` and `vendor_phone`. It also assumes that `id::text` is an acceptable unique legacy identifier. These assumptions must be checked against the actual Supabase schema before migration execution.
+The live policies on the four legacy tables currently grant full access to authenticated users. The HOD-approved single Biomedical Engineering login means no ward accounts will be created; wards use only the public QR lookup and reporting RPCs. This does not remove the need to verify that these public routes disclose only the intended information.
 
-No Supabase database connector or staging database connection is available in this repository session. Therefore the live schema, row counts, RLS policies and migration execution cannot be verified here. No live database or deployed app has been touched.
+At the 2026-11-28 inspection, all four live legacy tables contained zero rows. Consequently the backfill's column and type assumptions have been checked, but populated-data mapping and non-empty legacy history migration remain untested and require a restored staging copy. No production migration was applied.
 
 ## Batch 2 implementation design
 

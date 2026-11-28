@@ -408,6 +408,16 @@ function qrSvg(id){
   try{const q=qrcode(0,'M');q.addData(qrPayload(id));q.make();return q.createSvgTag({cellSize:4,margin:2,scalable:true});}
   catch(e){return '<div class="small">QR could not be drawn. Use the ID '+esc(id)+'.</div>';}
 }
+function assetQrPayload(a){
+  const p=new URLSearchParams();p.set('qrV','3');p.set('qrAssetId',a.id);
+  if(a.department_id)p.set('qrDeptId',a.department_id);
+  if(assetDetail.department)p.set('qrDept',assetDetail.department);
+  return location.href.split('#')[0]+'#/ar/'+encodeURIComponent(a.id)+'?'+p.toString();
+}
+function assetQrSvg(a){
+  try{const q=qrcode(0,'M');q.addData(assetQrPayload(a));q.make();return q.createSvgTag({cellSize:4,margin:2,scalable:true});}
+  catch(e){return '<div class="small">QR could not be drawn. Use asset code '+esc(a.asset_code)+'.</div>';}
+}
 
 
 /* ---------- canonical hospital asset register (read-only, paginated) ---------- */
@@ -463,6 +473,19 @@ function viewAssets(){
   h+='<label class="f">Rows per page<select id="assetPageSize">'+[25,50,100].map(n=>'<option value="'+n+'"'+(assetRegister.pageSize===n?' selected':'')+'>'+n+'</option>').join('')+'</select></label>';
   return h;
 }
+function viewAssetLabel(id){
+  if(!canManageHospital())return '<div class="fault"><b>Access restricted</b><p>Only Biomedical Engineering can print asset labels.</p></div>';
+  if(assetDetail.id!==id||(!assetDetail.data&&!assetDetail.loading&&!assetDetail.error)){
+    loadAssetDetail(id);
+    return '<div class="top"><a class="back" href="#/asset/'+esc(id)+'">‹ Asset details</a></div><h1>QR label</h1><p class="sub">Loading asset details…</p>';
+  }
+  if(assetDetail.loading)return '<h1>QR label</h1><p class="sub">Loading…</p>';
+  if(assetDetail.error||!assetDetail.data)return '<div class="fault"><b>Could not load asset</b><p>'+esc(assetDetail.error||'Asset not found.')+'</p></div>';
+  const a=assetDetail.data;
+  return '<div class="top"><a class="back" href="#/asset/'+esc(a.id)+'">‹ '+esc(a.name)+'</a><button class="btn noprint" data-act="print">Print</button></div>'+
+    '<div class="labelbig"><div class="qr">'+assetQrSvg(a)+'</div><b>'+esc(a.asset_code)+'</b><div>'+esc(a.name)+'</div><div class="small" style="color:#555">'+esc(assetDetail.department)+'</div></div>'+
+    '<div class="note noprint">This QR code contains the permanent asset ID, current department ID and department name. Scanning opens a public fault-report page. If the asset is transferred, print a replacement label.</div>';
+}
 
 /* ---------- canonical asset maintenance and work-order history ---------- */
 async function loadAssetDetail(id){
@@ -483,7 +506,7 @@ async function loadAssetDetail(id){
   }catch(e){
     assetDetail={id,loading:false,data:null,department:'',location:'',workOrders:[],error:e?.message||'Could not load asset history.'};
   }
-  if(location.hash==='#/asset/'+encodeURIComponent(id))render();
+  if(location.hash==='#/asset/'+encodeURIComponent(id)||location.hash==='#/asset-label/'+encodeURIComponent(id))render();
 }
 function viewAssetDetail(id){
   if(assetDetail.id!==id||(!assetDetail.data&&!assetDetail.loading&&!assetDetail.error)){
@@ -494,12 +517,12 @@ function viewAssetDetail(id){
   if(assetDetail.error)return '<div class="top"><a class="back" href="#/assets">‹ Asset register</a></div><div class="fault"><b>Could not load asset history</b><p>'+esc(assetDetail.error)+'</p><button class="btn" data-act="assetDetailRetry" data-id="'+esc(id)+'">Try again</button></div>';
   const a=assetDetail.data;
   if(!a)return '<div class="empty">Asset not found.</div>';
-  let h='<div class="top"><a class="back" href="#/assets">‹ Asset register</a>'+(canManageHospital()?'<button class="btn" data-act="editAsset" data-id="'+esc(a.id)+'">Edit asset</button>':'')+'</div>';
+  let h='<div class="top"><a class="back" href="#/assets">‹ Asset register</a>'+(canManageHospital()?'<div class="btnrow"><button class="btn" data-act="assetLabel" data-id="'+esc(a.id)+'">QR label</button><button class="btn" data-act="editAsset" data-id="'+esc(a.id)+'">Edit asset</button></div>':'')+'</div>';
   h+='<div class="hero"><div class="band"><span>'+esc(String(a.operational_status||'unknown').replaceAll('_',' '))+'</span><span>'+esc(a.asset_code)+'</span></div><div class="body"><h1 style="font-size:24px">'+esc(a.name)+'</h1><div class="id">'+esc(assetDetail.department)+' · '+esc(assetDetail.location)+'</div><dl class="kv"><dt>Category / type</dt><dd>'+esc(a.asset_kind||'Equipment')+'</dd><dt>Manufacturer / model</dt><dd>'+esc([a.manufacturer,a.model].filter(Boolean).join(' ')||'Not recorded')+'</dd><dt>Serial number</dt><dd>'+esc(a.serial_number||'Not recorded')+'</dd><dt>Physical condition</dt><dd>'+esc(a.physical_condition||'Not recorded')+'</dd><dt>Warranty expiry</dt><dd>'+esc(a.warranty_until||'Not recorded')+'</dd></dl></div></div>';
   if(canManageHospital())h+='<div class="actions"><button class="btn primary" data-act="newWorkOrder" data-id="'+esc(a.id)+'" data-type="fault">Report fault</button><button class="btn" data-act="newWorkOrder" data-id="'+esc(a.id)+'" data-type="preventive_maintenance">Log maintenance</button><button class="btn" data-act="newWorkOrder" data-id="'+esc(a.id)+'" data-type="calibration">Log calibration</button><button class="btn" data-act="newWorkOrder" data-id="'+esc(a.id)+'" data-type="safety_test">Log safety test</button></div>';
   h+='<div class="sec"><h2>Maintenance and fault history <small>'+assetDetail.workOrders.length+' records</small></h2>';
   if(!assetDetail.workOrders.length)h+='<div class="empty">No work orders or maintenance records have been recorded for this asset yet.</div>';
-  else h+='<div class="list">'+assetDetail.workOrders.map(w=>'<div class="tag"><div class="t"><div class="n">'+esc(String(w.work_order_type).replaceAll('_',' '))+'</div><span class="pill '+(w.status==='completed'?'ok':w.priority==='urgent'?'bad':'')+'">'+esc(w.status.replaceAll('_',' '))+'</span></div><div class="m">'+fmt(w.reported_at.slice(0,10))+' · '+esc(w.priority)+' priority</div><div class="d">'+esc(w.description)+'</div>'+(w.action_taken?'<div class="m">Action: '+esc(w.action_taken)+'</div>':'')+(w.parts_used?'<div class="m">Parts: '+esc(w.parts_used)+'</div>':'')+(w.performed_by?'<div class="m">Performed by: '+esc(w.performed_by)+'</div>':'')+(w.cost_ngn!=null?'<div class="m">Cost: '+naira(w.cost_ngn)+'</div>':'')+(w.next_due_date||w.next_due_hours!=null?'<div class="m">Next due: '+(w.next_due_date?fmt(w.next_due_date):'')+(w.next_due_hours!=null?' · '+esc(w.next_due_hours)+' hours':'')+'</div>':'')+(canManageHospital()?'<div class="btnrow"><button class="btn" data-act="editWorkOrder" data-id="'+esc(w.id)+'">Update record</button></div>':'')+'</div>').join('')+'</div>';
+  else h+='<div class="list">'+assetDetail.workOrders.map(w=>'<div class="tag"><div class="t"><div class="n">'+esc(String(w.work_order_type).replaceAll('_',' '))+'</div><span class="pill '+(w.status==='completed'?'ok':w.priority==='urgent'?'bad':'')+'">'+esc(w.status.replaceAll('_',' '))+'</span></div><div class="m">'+fmt(w.reported_at.slice(0,10))+' · '+esc(w.priority)+' priority</div><div class="d">'+esc(w.description)+'</div>'+(w.reporter_name?'<div class="m">Reported by: '+esc(w.reporter_name)+'</div>':'')+(w.action_taken?'<div class="m">Action: '+esc(w.action_taken)+'</div>':'')+(w.parts_used?'<div class="m">Parts: '+esc(w.parts_used)+'</div>':'')+(w.performed_by?'<div class="m">Performed by: '+esc(w.performed_by)+'</div>':'')+(w.cost_ngn!=null?'<div class="m">Cost: '+naira(w.cost_ngn)+'</div>':'')+(w.next_due_date||w.next_due_hours!=null?'<div class="m">Next due: '+(w.next_due_date?fmt(w.next_due_date):'')+(w.next_due_hours!=null?' · '+esc(w.next_due_hours)+' hours':'')+'</div>':'')+(canManageHospital()?'<div class="btnrow"><button class="btn" data-act="editWorkOrder" data-id="'+esc(w.id)+'">Update record</button></div>':'')+'</div>').join('')+'</div>';
   h+='</div><p class="small muted">This is the canonical asset history. Existing legacy device fault and service records remain preserved; their migration link is handled separately.</p>';
   return h;
 }
@@ -728,7 +751,13 @@ function startScan(){
         const k=Math.min(1,800/Math.max(vid.videoWidth,vid.videoHeight));
         cv.width=Math.max(1,Math.round(vid.videoWidth*k));cv.height=Math.max(1,Math.round(vid.videoHeight*k));cx.drawImage(vid,0,0,cv.width,cv.height);
         const im=cx.getImageData(0,0,cv.width,cv.height),r=jsQR(im.data,im.width,im.height,{inversionAttempts:'dontInvert'});
-        if(r&&r.data){const id=parseId(r.data);if(id){if(scanCb){if(Date.now()-lastHit>2000){lastHit=Date.now();scanCb(id);}}else{stopScan();location.hash=deviceHash(id,parseQrMeta(r.data));return;}}else msg.textContent='That code is not an equipment label.';}
+        if(r&&r.data){
+          const assetRoute=assetRouteFromQr(r.data);
+          if(assetRoute&&!scanCb){stopScan();location.hash=assetRoute;return;}
+          const id=parseId(r.data);
+          if(id){if(scanCb){if(Date.now()-lastHit>2000){lastHit=Date.now();scanCb(id);}}else{stopScan();location.hash=deviceHash(id,parseQrMeta(r.data));return;}}
+          else msg.textContent='That code is not an equipment label.';
+        }
       }
       scanRaf=requestAnimationFrame(tick);
     };tick();
@@ -748,9 +777,10 @@ function decodePhoto(file){
       cv.width=Math.round(img.width*k);cv.height=Math.round(img.height*k);
       const cx=cv.getContext('2d',{willReadFrequently:true});cx.drawImage(img,0,0,cv.width,cv.height);
       const im=cx.getImageData(0,0,cv.width,cv.height),r=jsQR(im.data,im.width,im.height,{inversionAttempts:'attemptBoth'});
-      if(r&&r.data)found={id:parseId(r.data),meta:parseQrMeta(r.data)};
+      if(r&&r.data){const assetRoute=assetRouteFromQr(r.data);found=assetRoute?{assetRoute}:{id:parseId(r.data),meta:parseQrMeta(r.data)};}
     });
-    if(found&&found.id){if(scanCb){scanCb(found.id);msg.textContent='Looking for a QR code...';}else location.hash=deviceHash(found.id,found.meta);}
+    if(found&&found.assetRoute&&!scanCb){location.hash=found.assetRoute;}
+    else if(found&&found.id){if(scanCb){scanCb(found.id);msg.textContent='Looking for a QR code...';}else location.hash=deviceHash(found.id,found.meta);}
     else{msg.textContent='No QR code found. Move closer, keep the label flat and well lit, then try again.';}
   };
   img.onerror=()=>{msg.textContent='Could not open that photo. Try again.';};
@@ -759,6 +789,11 @@ function decodePhoto(file){
 function stopScan(){scanning=false;cancelAnimationFrame(scanRaf);if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}
 function parseId(t){const m=String(t).match(/EQ-\d{4,}/i);return m?m[0].toUpperCase():null;}
 function parseQrMeta(t){const raw=String(t),q=raw.indexOf('?');if(q<0)return {};try{const p=new URLSearchParams(raw.slice(q+1));return {qrV:p.get('qrV')||'',qrDeptId:p.get('qrDeptId')||'',qrDept:p.get('qrDept')||''};}catch(e){return {};}}
+function assetRouteFromQr(t){
+  const m=String(t).match(/#\/ar\/([0-9a-f-]{36})(?:\?([^#]*))?/i);
+  if(!m||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(m[1]))return null;
+  return '#/ar/'+m[1].toLowerCase()+(m[2]?'?'+m[2]:'');
+}
 function deviceHash(id,meta){const p=new URLSearchParams();if(meta&&meta.qrDept)p.set('qrDept',meta.qrDept);if(meta&&meta.qrDeptId)p.set('qrDeptId',meta.qrDeptId);const suffix=p.toString();return '#/d/'+encodeURIComponent(id)+(suffix?'?'+suffix:'');}
 
 function viewMore(){
@@ -1000,13 +1035,16 @@ window.addEventListener('online',flushQueue);
 async function renderPublic(id,qrMeta){
   const app=$('#app');
   app.innerHTML='<h1>Report a fault</h1><p class="sub">Loading device...</p>';
-  const r=await sb.rpc('get_device_public',{p_id:id});
+  let r=await sb.rpc('get_device_public_v2',{p_id:id});
+  if(r.error)r=await sb.rpc('get_device_public',{p_id:id});
   if(r.error){app.innerHTML='<h1>Report a fault</h1><div class="empty">Could not reach the server. Check your connection and scan again.</div>';return;}
   const d=r.data&&r.data[0];
   if(!d){app.innerHTML='<h1>Report a fault</h1><div class="empty">This device was not found, or it has been retired. Check the label and try again.</div>';return;}
   const isOpen=!!d.fault_stage;
-  const staleQr=qrMeta&&qrMeta.qrDept&&String(qrMeta.qrDept).trim().toLowerCase()!==String(d.ward||'').trim().toLowerCase();
-  app.innerHTML='<h1>Report a fault</h1>'+(staleQr?'<div class="fault"><b>QR label may be out of date.</b><p>The label identifies '+esc(qrMeta.qrDept)+', but the current register lists '+esc(d.ward)+'. Please confirm this is the correct asset before submitting a fault report.</p></div>':'')+'<div class="hero" style="--c:'+(isOpen?'var(--bad)':'var(--ok)')+';margin-top:12px"><div class="band"><span>'+(isOpen?'Fault reported':'Working')+'</span><span>'+esc(d.id)+'</span></div><div class="body"><h3 style="font-size:20px">'+esc(d.name)+'</h3><div class="id">'+esc(d.ward)+(d.critical?' · Critical equipment':'')+'</div></div></div>'+
+  const staleByName=qrMeta&&qrMeta.qrDept&&String(qrMeta.qrDept).trim().toLowerCase()!==String(d.ward||'').trim().toLowerCase();
+  const staleById=qrMeta&&qrMeta.qrDeptId&&(!d.department_id||String(qrMeta.qrDeptId)!==String(d.department_id));
+  const staleQr=!!(staleByName||staleById);
+  app.innerHTML='<h1>Report a fault</h1>'+(staleQr?'<div class="fault"><b>QR label may be out of date.</b><p>The label identifies '+esc(qrMeta.qrDept||'a previous department')+', but the current register lists '+esc(d.ward)+'. '+(staleById?'The department ID also differs or could not be verified. ':'')+'Confirm the asset location and print a replacement label if it has been transferred.</p></div>':'')+'<div class="hero" style="--c:'+(isOpen?'var(--bad)':'var(--ok)')+';margin-top:12px"><div class="band"><span>'+(isOpen?'Fault reported':'Working')+'</span><span>'+esc(d.id)+'</span></div><div class="body"><h3 style="font-size:20px">'+esc(d.name)+'</h3><div class="id">'+esc(d.ward)+(d.critical?' · Critical equipment':'')+'</div></div></div>'+
   (isOpen?'<div class="fault"><h3>Already being handled</h3><p>A fault on this device was reported on '+fmt(d.fault_since)+'. Current status: '+esc(d.fault_stage)+'. No need to report it again.</p></div>':
   '<form id="pubForm"><label class="f">What is wrong?<textarea name="desc" required maxlength="1000" placeholder="e.g. Screen blank, alarm sounding, no power"></textarea></label>'+
   '<label class="f">Priority<select name="priority"><option value="Normal">Normal</option><option value="Urgent">Urgent - patient care affected</option></select></label>'+
@@ -1033,6 +1071,55 @@ async function renderPublic(id,qrMeta){
     const m=msgs[res.data]||['Something went wrong','Please try again.'];
     if(res.data==='invalid'||!msgs[res.data]){toast(m[1]);return;}
     $('#app').innerHTML='<h1>'+m[0]+'</h1><div class="empty" style="margin-top:14px">'+m[1]+'<div class="btnrow"><button class="btn" data-act="again" data-id="'+esc(d.id)+'">Report another problem</button></div></div>';
+  });
+}
+
+async function renderPublicAsset(id,qrMeta){
+  const app=$('#app');
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)){
+    app.innerHTML='<h1>Report a fault</h1><div class="empty">This asset QR code is not valid.</div>';return;
+  }
+  app.innerHTML='<h1>Report a fault</h1><p class="sub">Loading asset…</p>';
+  const r=await sb.rpc('get_asset_public',{p_asset_id:id});
+  if(r.error){app.innerHTML='<h1>Report a fault</h1><div class="empty">The asset reporting service is not available yet. Please contact Biomedical Engineering.</div>';return;}
+  const a=r.data&&r.data[0];
+  if(!a){app.innerHTML='<h1>Report a fault</h1><div class="empty">This asset was not found or has been retired. Contact Biomedical Engineering.</div>';return;}
+  const dept=a.department_name||'Department not assigned';
+  const staleById=!!(qrMeta&&qrMeta.qrDeptId&&String(qrMeta.qrDeptId)!==String(a.department_id||''));
+  const staleByName=!!(qrMeta&&qrMeta.qrDept&&String(qrMeta.qrDept).trim().toLowerCase()!==String(dept).trim().toLowerCase());
+  const staleQr=staleById||staleByName;
+  const isOpen=!!a.open_fault_status;
+  app.innerHTML='<h1>Report a fault</h1>'+
+    (staleQr?'<div class="fault"><b>QR label may be out of date.</b><p>The label identifies '+esc(qrMeta.qrDept||'a previous department')+', but the current register lists '+esc(dept)+'. '+(staleById?'The department ID also differs. ':'')+'Confirm the equipment location before reporting.</p></div>':'')+
+    '<div class="hero" style="--c:'+(isOpen?'var(--bad)':'var(--ok)')+';margin-top:12px"><div class="band"><span>'+(isOpen?'Fault reported':'Registered asset')+'</span><span>'+esc(a.asset_code)+'</span></div><div class="body"><h3 style="font-size:20px">'+esc(a.asset_name)+'</h3><div class="id">'+esc(dept)+(a.asset_kind?' · '+esc(a.asset_kind):'')+'</div>'+(a.model?'<div class="m">'+esc(a.model)+'</div>':'')+'</div></div>'+
+    (isOpen?'<div class="fault"><h3>Already being handled</h3><p>A fault was reported on this asset on '+fmt(String(a.open_fault_date||'').slice(0,10))+'. Current status: '+esc(a.open_fault_status)+'. No need to report it again.</p></div>':
+    '<form id="assetPubForm"><label class="f">What is wrong?<textarea name="desc" required maxlength="1000" placeholder="e.g. Screen blank, alarm sounding, no power"></textarea></label>'+
+    '<label class="f">Priority<select name="priority"><option value="Normal">Normal</option><option value="Urgent">Urgent - patient care affected</option></select></label>'+
+    '<label class="f">Your name (optional)<input name="reporter" maxlength="80" placeholder="e.g. Staff name"></label>'+
+    '<div class="btnrow"><button class="btn primary">Send report</button></div></form>');
+  const form=$('#assetPubForm');if(!form)return;
+  form.addEventListener('submit',async e=>{
+    e.preventDefault();const btn=form.querySelector('.primary');btn.disabled=true;
+    const fd=new FormData(form);
+    const payload={
+      p_asset_id:a.asset_id,
+      p_desc:String(fd.get('desc')||''),
+      p_priority:String(fd.get('priority')||'Normal'),
+      p_reporter:String(fd.get('reporter')||'')
+    };
+    const res=await sb.rpc('report_asset_fault',payload);
+    btn.disabled=false;
+    if(res.error){toast('Could not send report. Check the connection and try again.');return;}
+    const messages={
+      ok:['Fault reported','Biomedical Engineering will see this report.'],
+      duplicate:['Already reported','A fault is already awaiting attention for this asset.'],
+      invalid:['Description needed','Describe the problem and try again.'],
+      not_found:['Asset not found','The asset may have been retired or its label may be incorrect.']
+    };
+    const message=messages[res.data];
+    if(!message){toast('Something went wrong. Please try again.');return;}
+    if(res.data==='invalid'){toast(message[1]);return;}
+    app.innerHTML='<h1>'+message[0]+'</h1><div class="empty" style="margin-top:14px">'+message[1]+'<div class="btnrow"><button class="btn" data-act="assetAgain" data-id="'+esc(a.asset_id)+'">Check asset again</button></div></div>';
   });
 }
 
@@ -1185,6 +1272,7 @@ function render(){
   const p=path.split('/').filter(Boolean);
   const navEl=$('nav.bar');
   if(p[0]==='r'){navEl.style.display='none';renderPublic(decodeURIComponent(p[1]||'').toUpperCase(),q);return;}
+  if(p[0]==='ar'){navEl.style.display='none';renderPublicAsset(decodeURIComponent(p[1]||''),q);return;}
   if(!session){navEl.style.display='none';$('#app').innerHTML=viewLogin();bindLogin();return;}
   navEl.style.display='';
   if(!loaded){$('#app').innerHTML='<h1>Loading...</h1>';return;}
@@ -1193,6 +1281,7 @@ function render(){
     case 'devices':nav='devices';h=viewDevices(q);break;
     case 'assets':nav='more';h=viewAssets();break;
     case 'asset':nav='more';h=viewAssetDetail(decodeURIComponent(p[1]||''));break;
+    case 'asset-label':nav='more';h=viewAssetLabel(decodeURIComponent(p[1]||''));break;
     case 'd':nav='devices';h=viewDevice(decodeURIComponent(p[1]||''),q);break;
     case 'label':nav='devices';h=viewLabel(decodeURIComponent(p[1]||''));break;
     case 'labels':nav='devices';h=viewLabels();break;
@@ -1247,6 +1336,8 @@ document.addEventListener('click',async e=>{
     case 'refresh':if(await loadAll()){render();toast('Up to date');}break;
     case 'assetRetry':assetRegister.ready=false;assetRegister.error='';render();break;
     case 'viewAsset':location.hash='#/asset/'+encodeURIComponent(id);break;
+    case 'assetLabel':location.hash='#/asset-label/'+encodeURIComponent(id);break;
+    case 'assetAgain':location.hash='#/ar/'+encodeURIComponent(id);break;
     case 'assetDetailRetry':assetDetail.id='';assetDetail.error='';render();break;
     case 'newWorkOrder':{const a=assetDetail.data;if(a&&a.id===id)assetWorkOrderForm(a,null,t.dataset.type);break;}
     case 'editWorkOrder':{const a=assetDetail.data,w=assetDetail.workOrders.find(x=>x.id===id);if(a&&w)assetWorkOrderForm(a,w);break;}
@@ -1350,7 +1441,7 @@ if('serviceWorker' in navigator){
 })();
 function autoRefresh(){
   if(!session||document.hidden||!$('#sheet').hidden)return;
-  const h=location.hash;if(h.indexOf('#/r/')===0||h.indexOf('#/scan')===0||h.indexOf('#/import')===0||h.indexOf('#/audit')===0)return;
+  const h=location.hash;if(h.indexOf('#/r/')===0||h.indexOf('#/ar/')===0||h.indexOf('#/scan')===0||h.indexOf('#/import')===0||h.indexOf('#/audit')===0)return;
   const ae=document.activeElement;if(ae&&/INPUT|TEXTAREA|SELECT/.test(ae.tagName))return;
   const before=new Set(S.faults.filter(f=>!f.resolvedAt).map(f=>f.id));
   loadAll().then(ok=>{

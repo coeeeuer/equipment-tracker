@@ -11,12 +11,13 @@ This checklist distinguishes repository delivery from actual database installati
 
 ## Latest verified live status
 
-Last checked: 2026-11-27.
+Last checked: 2026-11-28.
 
 - Project health: `ACTIVE_HEALTHY`
 - Supabase migration history contains only `20261126195147_archive_pre_reset_equipment_tracker_test_data`.
 - Public schema contains only legacy `devices`, `faults`, `services` and `audits` tables.
 - No canonical hospital foundation tables are installed.
+- The legacy schema was inspected on 2026-11-28: expected migration source columns and device-history foreign keys are present. All four live legacy tables currently have zero rows.
 - No `asset_work_orders` table is installed.
 - No canonical transfer RPC is installed.
 - Legacy table counts at the check: devices 0, faults 0, services 0, audits 0.
@@ -37,6 +38,7 @@ Last checked: 2026-11-27.
 | 009 Atomic asset transfer | Transfer RPC | Not installed |
 | 010 Asset work-order history | Fault/repair/PM/calibration records | Not installed |
 | 011 Capacity/search indexes | Trigram and composite indexes | Not installed |
+| 012 Public asset QR reporting | Canonical QR lookups, public fault reporting and legacy department-ID validation | Not installed |
 
 ## How installation will be confirmed
 
