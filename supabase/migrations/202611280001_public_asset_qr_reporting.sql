@@ -67,7 +67,6 @@ returns table (
   department_name text,
   asset_kind text,
   model text,
-  serial_number text,
   critical boolean,
   operational_status text,
   open_fault_status text,
@@ -86,7 +85,6 @@ as $$
     coalesce(dep.name, 'Department not assigned'),
     a.asset_kind,
     a.model,
-    a.serial_number,
     a.critical,
     a.operational_status,
     wo.status,
@@ -106,6 +104,7 @@ as $$
     limit 1
   ) wo on true
   where a.id = p_asset_id
+    and a.hospital_id in (select h.id from public.hospitals h where h.slug = 'central-hospital')
     and a.retired_at is null
     and a.operational_status <> 'retired'
   limit 1;
@@ -141,6 +140,7 @@ begin
     into v_hospital_id, v_operational_status
   from public.assets a
   where a.id = p_asset_id
+    and a.hospital_id in (select h.id from public.hospitals h where h.slug = 'central-hospital')
     and a.retired_at is null
   for update;
 
