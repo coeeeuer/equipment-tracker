@@ -74,7 +74,7 @@ jobs:
         run: |
           psql -v ON_ERROR_STOP=1 <<'SQL'
           do $$
-          declare v_count integer; v_hospital uuid; v_department uuid; v_asset uuid; v_result text;
+          declare v_count integer; v_hospital uuid; v_department uuid; v_asset uuid; v_result text; v_legacy_department uuid;
           begin
             if to_regclass('public.assets') is null or to_regclass('public.asset_work_orders') is null
               or to_regclass('public.generators') is null then
@@ -91,6 +91,10 @@ jobs:
             select id into v_department from public.departments
               where hospital_id = v_hospital and name = 'Maternity Ward';
             if v_hospital is null or v_department is null then raise exception 'Hospital/ward seed missing'; end if;
+            insert into public.devices (id, name, ward, category) values ('EQ-9001', 'CI legacy QR asset', 'Maternity Ward', 'equipment');
+            insert into public.faults (device_id, stage, description) values ('EQ-9001', 'open', 'CI legacy QR fault');
+            select department_id into v_legacy_department from public.get_device_public_v2('EQ-9001');
+            if v_legacy_department is distinct from v_department then raise exception 'Legacy QR lookup did not return current department ID'; end if;
             insert into public.assets (hospital_id, asset_code, name, department_id)
               values (v_hospital, 'CI-QR-001', 'CI QR test asset', v_department) returning id into v_asset;
             v_result := public.report_asset_fault(v_asset, 'CI integration fault', 'Urgent', 'CI tester');
