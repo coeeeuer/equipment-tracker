@@ -1,0 +1,106 @@
+name: PostgreSQL migration integration
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "supabase/migrations/**"
+      - ".github/workflows/postgres-migrations.yml"
+  workflow_dispatch:
+
+jobs:
+  migration-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: equipment_tracker_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d equipment_tracker_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: equipment_tracker_test
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare minimal Supabase-compatible baseline
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          create role anon nologin;
+          create role authenticated nologin;
+          create schema auth;
+          create schema extensions;
+          create table auth.users (id uuid primary key, email text unique, created_at timestamptz default now());
+          create or replace function auth.uid() returns uuid language sql stable as $$
+            select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+          $$;
+          create extension if not exists pgcrypto;
+          create extension if not exists pg_trgm with schema extensions;
+          create table public.devices (
+            id text primary key, name text not null, ward text, category text, model text, serial text,
+            critical boolean default false, retired boolean not null default false,
+            replacement_cost numeric(14,2), warranty_until date, vendor text, vendor_phone text
+          );
+          create table public.faults (
+            id bigserial primary key, device_id text, stage text,
+            reported_at timestamptz default now(), resolved_at timestamptz, description text
+          );
+          create table public.services (
+            id bigserial primary key, device_id text, service_date date default current_date, description text
+          );
+          create table public.audits (id bigserial primary key, created_at timestamptz default now());
+          SQL
+      - name: Apply every migration in filename order
+        run: |
+          set -euo pipefail
+          while IFS= read -r migration; do
+            echo "::group::Applying $migration"
+            psql -v ON_ERROR_STOP=1 -f "$migration"
+            echo "::endgroup::"
+          done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | sort)
+      - name: Verify schema, directory, QR RPCs and public reporting
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          declare v_count integer; v_hospital uuid; v_department uuid; v_asset uuid; v_result text;
+          begin
+            if to_regclass('public.assets') is null or to_regclass('public.asset_work_orders') is null
+              or to_regclass('public.generators') is null then
+              raise exception 'Required hospital tables are missing';
+            end if;
+            if to_regprocedure('public.get_asset_public(uuid)') is null
+              or to_regprocedure('public.report_asset_fault(uuid,text,text,text)') is null
+              or to_regprocedure('public.transfer_asset(uuid,uuid,uuid,timestamptz,text)') is null then
+              raise exception 'Required QR/transfer RPC is missing';
+            end if;
+            select count(*) into v_count from public.departments;
+            if v_count <> 8 then raise exception 'Expected 8 departments, found %', v_count; end if;
+            select id into v_hospital from public.hospitals where slug = 'central-hospital';
+            select id into v_department from public.departments
+              where hospital_id = v_hospital and name = 'Maternity Ward';
+            if v_hospital is null or v_department is null then raise exception 'Hospital/ward seed missing'; end if;
+            insert into public.assets (hospital_id, asset_code, name, department_id)
+              values (v_hospital, 'CI-QR-001', 'CI QR test asset', v_department) returning id into v_asset;
+            v_result := public.report_asset_fault(v_asset, 'CI integration fault', 'Urgent', 'CI tester');
+            if v_result <> 'ok' then raise exception 'QR report returned %', v_result; end if;
+            if not exists (select 1 from public.asset_work_orders where asset_id = v_asset
+              and reporter_name = 'CI tester' and priority = 'urgent' and status = 'open') then
+              raise exception 'QR report work order is incorrect';
+            end if;
+            v_result := public.report_asset_fault(v_asset, 'Duplicate CI fault', 'Normal', null);
+            if v_result <> 'duplicate' then raise exception 'Duplicate guard returned %', v_result; end if;
+          end $$;
+          select has_function_privilege('anon', 'public.get_asset_public(uuid)', 'EXECUTE');
+          select has_function_privilege('anon', 'public.report_asset_fault(uuid,text,text,text)', 'EXECUTE');
+          select has_table_privilege('anon', 'public.assets', 'SELECT');
+          SQL
