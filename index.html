@@ -790,7 +790,7 @@ function stopScan(){scanning=false;cancelAnimationFrame(scanRaf);if(stream){stre
 function parseId(t){const m=String(t).match(/EQ-\d{4,}/i);return m?m[0].toUpperCase():null;}
 function parseQrMeta(t){const raw=String(t),q=raw.indexOf('?');if(q<0)return {};try{const p=new URLSearchParams(raw.slice(q+1));return {qrV:p.get('qrV')||'',qrDeptId:p.get('qrDeptId')||'',qrDept:p.get('qrDept')||''};}catch(e){return {};}}
 function assetRouteFromQr(t){
-  const m=String(t).match(/#\\/ar\\/([0-9a-f-]{36})(?:\\?([^#]*))?/i);
+  const m=String(t).match(/#\/ar\/([0-9a-f-]{36})(?:\?([^#]*))?/i);
   if(!m||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(m[1]))return null;
   return '#/ar/'+m[1].toLowerCase()+(m[2]?'?'+m[2]:'');
 }
