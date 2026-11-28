@@ -35,7 +35,7 @@ as $$
     d.category,
     d.critical,
     f.stage,
-    f.reported_at,
+    f.reported_at::date,
     dep.id as department_id
   from public.devices d
   left join public.hospitals h
